@@ -6,3 +6,6 @@ dist
 coverage
 .tsbuildinfo
 
+# Keep library build output tracked for git deps (bird CI, etc).
+!packages/core/dist/
+!packages/core/dist/**

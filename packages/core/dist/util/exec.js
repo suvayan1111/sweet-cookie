@@ -1,0 +1,40 @@
+import { spawn } from 'node:child_process';
+export async function execCapture(file, args, options = {}) {
+    const timeoutMs = options.timeoutMs ?? 10_000;
+    return new Promise((resolve) => {
+        const child = spawn(file, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.setEncoding('utf8');
+        child.stderr.setEncoding('utf8');
+        child.stdout.on('data', (chunk) => {
+            stdout += chunk;
+        });
+        child.stderr.on('data', (chunk) => {
+            stderr += chunk;
+        });
+        const timer = setTimeout(() => {
+            try {
+                child.kill('SIGKILL');
+            }
+            catch {
+                // ignore
+            }
+            resolve({ code: 124, stdout, stderr: `${stderr}\nTimed out after ${timeoutMs}ms` });
+        }, timeoutMs);
+        timer.unref?.();
+        child.on('error', (error) => {
+            clearTimeout(timer);
+            resolve({
+                code: 127,
+                stdout,
+                stderr: `${stderr}\n${error instanceof Error ? error.message : String(error)}`,
+            });
+        });
+        child.on('close', (code) => {
+            clearTimeout(timer);
+            resolve({ code: code ?? 0, stdout, stderr });
+        });
+    });
+}
+//# sourceMappingURL=exec.js.map
