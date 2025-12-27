@@ -3,11 +3,13 @@
  *
  * Notes:
  * - `safari` is macOS-only.
- * - `chrome` targets Chromium-based browsers. Default path discovery targets Google Chrome,
- *   but other Chromium browsers often work by passing an explicit cookie DB path via `chromeProfile`.
+ * - `chrome` targets Google Chrome paths by default.
+ * - `edge` targets Microsoft Edge paths by default.
+ * - Other Chromium browsers often work by passing an explicit cookie DB path via `chromeProfile`
+ *   (or `edgeProfile` if you want to keep sources separate).
  * - Only modern Chromium cookie DB schemas are supported (roughly Chrome >= 100).
  */
-export type BrowserName = 'chrome' | 'firefox' | 'safari';
+export type BrowserName = 'chrome' | 'edge' | 'firefox' | 'safari';
 
 export type CookieSameSite = 'Strict' | 'Lax' | 'None';
 
@@ -72,6 +74,15 @@ export interface GetCookiesOptions {
 	 * - a path to a cookie DB file (`.../Network/Cookies` or `.../Cookies`)
 	 */
 	chromeProfile?: string;
+	/**
+	 * Microsoft Edge profile selector.
+	 *
+	 * Accepted values:
+	 * - profile directory name like `Default` / `Profile 2`
+	 * - a path to a profile directory
+	 * - a path to a cookie DB file (`.../Network/Cookies` or `.../Cookies`)
+	 */
+	edgeProfile?: string;
 	/**
 	 * Firefox profile selector (profile name or filesystem path).
 	 * If a directory is provided, `cookies.sqlite` is resolved within it.

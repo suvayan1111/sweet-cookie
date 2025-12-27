@@ -4,6 +4,7 @@ import type { Cookie, CookieHeaderOptions, GetCookiesOptions, GetCookiesResult }
  *
  * Supported backends:
  * - `chrome`: macOS / Windows / Linux (Chromium-based; default discovery targets Google Chrome paths)
+ * - `edge`: macOS / Windows / Linux (Chromium-based; default discovery targets Microsoft Edge paths)
  * - `firefox`: macOS / Windows / Linux
  * - `safari`: macOS only (`Cookies.binarycookies`)
  *

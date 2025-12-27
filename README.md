@@ -43,7 +43,7 @@ import { getCookies, toCookieHeader } from '@steipete/sweet-cookie';
 const { cookies, warnings } = await getCookies({
   url: 'https://example.com/',
   names: ['session', 'csrf'],
-  browsers: ['chrome', 'firefox', 'safari'],
+  browsers: ['chrome', 'edge', 'firefox', 'safari'],
 });
 
 for (const warning of warnings) console.warn(warning);
@@ -68,9 +68,19 @@ Pick a specific profile or pass an explicit Chrome cookie DB path:
 ```ts
 await getCookies({
   url: 'https://example.com/',
-  browsers: ['chrome'],
+  browsers: ['chrome'], // or ['edge']
   chromeProfile: 'Default', // or '/path/to/.../Network/Cookies'
 });
+
+Pick a specific Edge profile or pass an explicit Edge cookie DB path:
+
+```ts
+await getCookies({
+  url: 'https://example.com/',
+  browsers: ['edge'],
+  edgeProfile: 'Default', // or '/path/to/.../Network/Cookies'
+});
+```
 ```
 
 Inline cookies (works on any OS/runtime; no browser DB access required):
@@ -89,6 +99,9 @@ await getCookies({
   - Default discovery targets Google Chrome paths.
   - Other Chromium browsers typically work by passing `chromeProfile` as an explicit `Cookies` DB path.
   - Only supports modern Chromium cookie DB schemas (roughly Chrome `>=100`).
+- `edge` (Chromium-based): macOS / Windows / Linux
+  - Default discovery targets Microsoft Edge paths.
+  - Only supports modern Chromium cookie DB schemas (roughly Edge/Chrome `>=100`).
 - `firefox`: macOS / Windows / Linux
 - `safari`: macOS only (reads `Cookies.binarycookies`)
 
@@ -97,9 +110,10 @@ await getCookies({
 - `url` (required): base URL used for origin filtering.
 - `origins`: additional origins to consider (deduped).
 - `names`: allowlist cookie names.
-- `browsers`: source order (`chrome`, `firefox`, `safari`).
+- `browsers`: source order (`chrome`, `edge`, `firefox`, `safari`).
 - `mode`: `merge` (default) or `first`.
 - `chromeProfile`: Chrome profile name/path (profile dir or `Cookies` DB file).
+- `edgeProfile`: Edge profile name/path (profile dir or `Cookies` DB file).
 - `firefoxProfile`: Firefox profile name/path.
 - `safariCookiesFile`: override path to `Cookies.binarycookies` (tests/debug).
 - Inline sources: `inlineCookiesJson`, `inlineCookiesBase64`, `inlineCookiesFile`.
@@ -111,8 +125,8 @@ await getCookies({
 
 - `SWEET_COOKIE_BROWSERS` / `SWEET_COOKIE_SOURCES`: `chrome,safari,firefox`
 - `SWEET_COOKIE_MODE`: `merge|first`
-- `SWEET_COOKIE_CHROME_PROFILE`, `SWEET_COOKIE_FIREFOX_PROFILE`
-- Linux-only: `SWEET_COOKIE_LINUX_KEYRING=gnome|kwallet|basic`, `SWEET_COOKIE_CHROME_SAFE_STORAGE_PASSWORD=...`
+- `SWEET_COOKIE_CHROME_PROFILE`, `SWEET_COOKIE_EDGE_PROFILE`, `SWEET_COOKIE_FIREFOX_PROFILE`
+- Linux-only: `SWEET_COOKIE_LINUX_KEYRING=gnome|kwallet|basic`, `SWEET_COOKIE_CHROME_SAFE_STORAGE_PASSWORD=...`, `SWEET_COOKIE_EDGE_SAFE_STORAGE_PASSWORD=...`
 
 ## Inline cookie payload format
 

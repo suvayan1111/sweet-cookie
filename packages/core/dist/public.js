@@ -1,4 +1,5 @@
 import { getCookiesFromChrome } from './providers/chrome.js';
+import { getCookiesFromEdge } from './providers/edge.js';
 import { getCookiesFromFirefox } from './providers/firefoxSqlite.js';
 import { getCookiesFromInline } from './providers/inline.js';
 import { getCookiesFromSafari } from './providers/safariBinaryCookies.js';
@@ -9,6 +10,7 @@ const DEFAULT_BROWSERS = ['chrome', 'safari', 'firefox'];
  *
  * Supported backends:
  * - `chrome`: macOS / Windows / Linux (Chromium-based; default discovery targets Google Chrome paths)
+ * - `edge`: macOS / Windows / Linux (Chromium-based; default discovery targets Microsoft Edge paths)
  * - `firefox`: macOS / Windows / Linux
  * - `safari`: macOS only (`Cookies.binarycookies`)
  *
@@ -66,6 +68,22 @@ export async function getCookies(options) {
             if (options.debug !== undefined)
                 chromeOptions.debug = options.debug;
             result = await getCookiesFromChrome(chromeOptions, origins, names);
+        }
+        else if (browser === 'edge') {
+            const edgeOptions = {};
+            const edgeProfile = options.edgeProfile ??
+                options.profile ??
+                readEnv('SWEET_COOKIE_EDGE_PROFILE') ??
+                readEnv('SWEET_COOKIE_CHROME_PROFILE');
+            if (edgeProfile)
+                edgeOptions.profile = edgeProfile;
+            if (options.timeoutMs !== undefined)
+                edgeOptions.timeoutMs = options.timeoutMs;
+            if (options.includeExpired !== undefined)
+                edgeOptions.includeExpired = options.includeExpired;
+            if (options.debug !== undefined)
+                edgeOptions.debug = options.debug;
+            result = await getCookiesFromEdge(edgeOptions, origins, names);
         }
         else if (browser === 'firefox') {
             const firefoxOptions = {};
@@ -153,7 +171,7 @@ function parseBrowsersEnv() {
         .filter(Boolean);
     const out = [];
     for (const token of tokens) {
-        if (token === 'chrome' || token === 'firefox' || token === 'safari') {
+        if (token === 'chrome' || token === 'edge' || token === 'firefox' || token === 'safari') {
             if (!out.includes(token))
                 out.push(token);
         }
