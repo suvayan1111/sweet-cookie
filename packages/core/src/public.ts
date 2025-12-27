@@ -42,6 +42,8 @@ export async function getCookies(options: GetCookiesOptions): Promise<GetCookies
 	const mode = options.mode ?? parseModeEnv() ?? 'merge';
 
 	const inlineSources = await resolveInlineSources(options);
+	// Inline sources are the most reliable path (they bypass DB locks + keychain prompts).
+	// We short-circuit on the first inline source that yields any cookies.
 	for (const source of inlineSources) {
 		const inlineResult = await getCookiesFromInline(source, origins, names);
 		warnings.push(...inlineResult.warnings);
@@ -52,6 +54,7 @@ export async function getCookies(options: GetCookiesOptions): Promise<GetCookies
 
 	const merged = new Map<string, Cookie>();
 	const tryAdd = (cookie: Cookie) => {
+		// Dedupe by name+domain+path (a common stable identity for HTTP cookies).
 		const domain = cookie.domain ?? '';
 		const pathValue = cookie.path ?? '';
 		const key = `${cookie.name}|${domain}|${pathValue}`;
@@ -93,6 +96,7 @@ export async function getCookies(options: GetCookiesOptions): Promise<GetCookies
 		warnings.push(...result.warnings);
 
 		if (mode === 'first' && result.cookies.length) {
+			// "first" returns the first backend that produced anything (plus accumulated warnings).
 			return { cookies: result.cookies, warnings };
 		}
 

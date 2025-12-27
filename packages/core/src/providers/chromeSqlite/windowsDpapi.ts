@@ -6,6 +6,8 @@ export async function dpapiUnprotect(
 ): Promise<{ ok: true; value: Buffer } | { ok: false; error: string }> {
 	const timeoutMs = options.timeoutMs ?? 5_000;
 
+	// There is no cross-platform JS API for Windows DPAPI, and we explicitly avoid native addons.
+	// PowerShell can call ProtectedData.Unprotect for the current user, which matches Chrome's behavior.
 	const inputB64 = data.toString('base64');
 	const prelude =
 		'try { Add-Type -AssemblyName System.Security.Cryptography.ProtectedData -ErrorAction Stop } catch { try { Add-Type -AssemblyName System.Security -ErrorAction Stop } catch {} };';

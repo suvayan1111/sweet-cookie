@@ -88,6 +88,7 @@ await getCookies({
 - `chrome` (Chromium-based): macOS / Windows / Linux
   - Default discovery targets Google Chrome paths.
   - Other Chromium browsers typically work by passing `chromeProfile` as an explicit `Cookies` DB path.
+  - Only supports modern Chromium cookie DB schemas (roughly Chrome `>=100`).
 - `firefox`: macOS / Windows / Linux
 - `safari`: macOS only (reads `Cookies.binarycookies`)
 

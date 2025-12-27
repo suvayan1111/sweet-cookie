@@ -5,6 +5,7 @@
  * - `safari` is macOS-only.
  * - `chrome` targets Chromium-based browsers. Default path discovery targets Google Chrome,
  *   but other Chromium browsers often work by passing an explicit cookie DB path via `chromeProfile`.
+ * - Only modern Chromium cookie DB schemas are supported (roughly Chrome >= 100).
  */
 export type BrowserName = 'chrome' | 'firefox' | 'safari';
 

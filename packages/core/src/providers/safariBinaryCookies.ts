@@ -28,6 +28,8 @@ export async function getCookiesFromSafari(
 
 	try {
 		const data = readFileSync(cookieFile);
+		// Safari's `Cookies.binarycookies` is a small binary container with multiple "pages".
+		// We decode only the fields we need (name/value/domain/path/flags/expiry).
 		const parsed = decodeBinaryCookies(data);
 		const cookies: Cookie[] = [];
 		for (const cookie of parsed) {
@@ -124,6 +126,7 @@ function decodeCookie(cookieBuffer: Buffer): Cookie | null {
 	const pathOffset = cookieBuffer.readUInt32LE(24);
 	const valueOffset = cookieBuffer.readUInt32LE(28);
 
+	// Safari stores dates as "Mac absolute time" (seconds since 2001-01-01).
 	const expiration = readDoubleLE(cookieBuffer, 40);
 
 	const rawUrl = readCString(cookieBuffer, urlOffset, size);

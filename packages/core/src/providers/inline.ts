@@ -12,6 +12,11 @@ export async function getCookiesFromInline(
 ): Promise<GetCookiesResult> {
 	const warnings: string[] = [];
 
+	// Inline sources can be:
+	// - the payload itself (JSON or base64)
+	// - a file path that contains JSON/base64
+	//
+	// We do a small heuristic: treat `*.json`/`*.base64` and explicit "file" sources as file paths first.
 	const rawPayload =
 		inline.source.endsWith('file') ||
 		inline.payload.endsWith('.json') ||
@@ -19,6 +24,7 @@ export async function getCookiesFromInline(
 			? ((await readTextFileIfExists(inline.payload)) ?? inline.payload)
 			: inline.payload;
 
+	// If it looks like base64, decode it to JSON. Otherwise use it as-is.
 	const decoded = tryDecodeBase64Json(rawPayload) ?? rawPayload;
 	const parsed = tryParseCookiePayload(decoded);
 	if (!parsed) {

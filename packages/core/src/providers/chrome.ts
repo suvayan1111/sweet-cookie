@@ -10,6 +10,7 @@ export async function getCookiesFromChrome(
 ): Promise<GetCookiesResult> {
 	const warnings: string[] = [];
 
+	// Platform dispatch only. All real logic lives in the per-OS providers.
 	if (process.platform === 'darwin') {
 		const r = await getCookiesFromChromeSqliteMac(options, origins, allowlistNames);
 		warnings.push(...r.warnings);
