@@ -71,7 +71,7 @@ function resolveChromeCookiesDbLinux(profile) {
     return null;
 }
 function looksLikePath(value) {
-    return value.includes('/') || value.includes('\\\\');
+    return value.includes('/') || value.includes('\\');
 }
 function expandPath(input, home) {
     if (input.startsWith('~/'))

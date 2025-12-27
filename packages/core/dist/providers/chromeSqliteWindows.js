@@ -116,7 +116,7 @@ function findUserDataDir(cookiesDbPath) {
     return null;
 }
 function looksLikePath(value) {
-    return value.includes('/') || value.includes('\\\\');
+    return value.includes('/') || value.includes('\\');
 }
 function expandPath(input) {
     if (input.startsWith('~/'))

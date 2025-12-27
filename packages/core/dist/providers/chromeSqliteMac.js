@@ -80,6 +80,6 @@ function expandPath(input) {
     return path.isAbsolute(input) ? input : path.resolve(process.cwd(), input);
 }
 function looksLikePath(value) {
-    return value.includes('/') || value.includes('\\\\');
+    return value.includes('/') || value.includes('\\');
 }
 //# sourceMappingURL=chromeSqliteMac.js.map

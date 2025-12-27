@@ -104,5 +104,5 @@ function expandPath(input: string): string {
 }
 
 function looksLikePath(value: string): boolean {
-	return value.includes('/') || value.includes('\\\\');
+	return value.includes('/') || value.includes('\\');
 }
