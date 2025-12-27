@@ -72,10 +72,12 @@ describe('public API', () => {
 			},
 		];
 
-		const getCookiesPromised = vi.fn(async () => [
-			{ name: 'chrome', value: 'c', domain: 'chatgpt.com', path: '/', secure: true },
-		]);
-		vi.doMock('chrome-cookies-secure', () => ({ default: { getCookiesPromised } }));
+		vi.doMock('../src/providers/chrome.js', () => ({
+			getCookiesFromChrome: async () => ({
+				cookies: [{ name: 'chrome', value: 'c', domain: 'chatgpt.com', path: '/', secure: true }],
+				warnings: [],
+			}),
+		}));
 
 		vi.stubEnv('SWEET_COOKIE_BROWSERS', 'firefox, chrome');
 		vi.stubEnv('SWEET_COOKIE_MODE', 'merge');
@@ -156,11 +158,15 @@ describe('public API', () => {
 			},
 		];
 
-		const getCookiesPromised = vi.fn(async () => [
-			{ name: 'dup', value: 'x', domain: 'chatgpt.com', path: '/', secure: true },
-			{ name: 'chrome', value: 'c', domain: 'chatgpt.com', path: '/', secure: true },
-		]);
-		vi.doMock('chrome-cookies-secure', () => ({ default: { getCookiesPromised } }));
+		vi.doMock('../src/providers/chrome.js', () => ({
+			getCookiesFromChrome: async () => ({
+				cookies: [
+					{ name: 'dup', value: 'x', domain: 'chatgpt.com', path: '/', secure: true },
+					{ name: 'chrome', value: 'c', domain: 'chatgpt.com', path: '/', secure: true },
+				],
+				warnings: [],
+			}),
+		}));
 
 		const { getCookies } = await import('../src/index.js');
 		const res = await getCookies({
@@ -193,11 +199,6 @@ describe('public API', () => {
 				sameSite: 0,
 			},
 		];
-
-		const getCookiesPromised = vi.fn(async () => [
-			{ name: 'chrome', value: 'c', domain: 'chatgpt.com', path: '/', secure: true },
-		]);
-		vi.doMock('chrome-cookies-secure', () => ({ default: { getCookiesPromised } }));
 
 		const { getCookies } = await import('../src/index.js');
 		const res = await getCookies({

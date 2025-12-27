@@ -1,0 +1,98 @@
+import { execCapture } from '../../util/exec.js';
+
+export type LinuxKeyringBackend = 'gnome' | 'kwallet' | 'basic';
+
+export async function getLinuxChromeSafeStoragePassword(
+	options: { backend?: LinuxKeyringBackend } = {}
+): Promise<{ password: string; warnings: string[] }> {
+	const warnings: string[] = [];
+
+	const override = readEnv('SWEET_COOKIE_CHROME_SAFE_STORAGE_PASSWORD');
+	if (override !== undefined) return { password: override, warnings };
+
+	const backend = options.backend ?? parseLinuxKeyringBackend() ?? chooseLinuxKeyringBackend();
+	if (backend === 'basic') return { password: '', warnings };
+
+	if (backend === 'gnome') {
+		const res = await execCapture(
+			'secret-tool',
+			['lookup', 'service', 'Chrome Safe Storage', 'account', 'Chrome'],
+			{ timeoutMs: 3_000 }
+		);
+		if (res.code === 0) return { password: res.stdout.trim(), warnings };
+		warnings.push('Failed to read Linux keyring via secret-tool; v11 cookies may be unavailable.');
+		return { password: '', warnings };
+	}
+
+	const kdeVersion = (readEnv('KDE_SESSION_VERSION') ?? '').trim();
+	const serviceName =
+		kdeVersion === '6'
+			? 'org.kde.kwalletd6'
+			: kdeVersion === '5'
+				? 'org.kde.kwalletd5'
+				: 'org.kde.kwalletd';
+	const walletPath =
+		kdeVersion === '6'
+			? '/modules/kwalletd6'
+			: kdeVersion === '5'
+				? '/modules/kwalletd5'
+				: '/modules/kwalletd';
+
+	const wallet = await getKWalletNetworkWallet(serviceName, walletPath);
+	const passwordRes = await execCapture(
+		'kwallet-query',
+		['--read-password', 'Chrome Safe Storage', '--folder', 'Chrome Keys', wallet],
+		{ timeoutMs: 3_000 }
+	);
+	if (passwordRes.code !== 0) {
+		warnings.push(
+			'Failed to read Linux keyring via kwallet-query; v11 cookies may be unavailable.'
+		);
+		return { password: '', warnings };
+	}
+	if (passwordRes.stdout.toLowerCase().startsWith('failed to read'))
+		return { password: '', warnings };
+	return { password: passwordRes.stdout.trim(), warnings };
+}
+
+function parseLinuxKeyringBackend(): LinuxKeyringBackend | undefined {
+	const raw = readEnv('SWEET_COOKIE_LINUX_KEYRING');
+	if (!raw) return undefined;
+	const normalized = raw.toLowerCase();
+	if (normalized === 'gnome') return 'gnome';
+	if (normalized === 'kwallet') return 'kwallet';
+	if (normalized === 'basic') return 'basic';
+	return undefined;
+}
+
+function chooseLinuxKeyringBackend(): LinuxKeyringBackend {
+	const xdg = readEnv('XDG_CURRENT_DESKTOP') ?? '';
+	const isKde =
+		xdg.split(':').some((p) => p.trim().toLowerCase() === 'kde') || !!readEnv('KDE_FULL_SESSION');
+	return isKde ? 'kwallet' : 'gnome';
+}
+
+async function getKWalletNetworkWallet(serviceName: string, walletPath: string): Promise<string> {
+	const res = await execCapture(
+		'dbus-send',
+		[
+			'--session',
+			'--print-reply=literal',
+			`--dest=${serviceName}`,
+			walletPath,
+			'org.kde.KWallet.networkWallet',
+		],
+		{ timeoutMs: 3_000 }
+	);
+	const fallback = 'kdewallet';
+	if (res.code !== 0) return fallback;
+	const raw = res.stdout.trim();
+	if (!raw) return fallback;
+	return raw.replaceAll('"', '').trim() || fallback;
+}
+
+function readEnv(key: string): string | undefined {
+	const value = process.env[key];
+	const trimmed = typeof value === 'string' ? value.trim() : '';
+	return trimmed.length ? trimmed : undefined;
+}

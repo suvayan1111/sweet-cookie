@@ -16,7 +16,7 @@ We keep hitting three realities:
 Sweet Cookie standardizes on one flow:
 1) Inline cookies (exported by the extension) — most reliable.
 2) Best-effort local reads:
-   - Chrome: `chrome-cookies-secure` (if installed) + macOS `node:sqlite`/`bun:sqlite` + keychain fallback
+   - Chrome: runtime SQLite (`node:sqlite` / `bun:sqlite`) + OS key storage (Keychain/DPAPI/keyring)
    - Firefox: `node:sqlite` (Node) or `bun:sqlite` (Bun)
    - Safari: binarycookies parsing
 
@@ -57,7 +57,7 @@ Options (high-signal):
 - `names`: allowlist cookie names
 - `browsers`: source order (`chrome|safari|firefox`)
 - `mode`: `merge` (default) or `first`
-- `profile` / `chromeProfile`: Chrome profile name/path for `chrome-cookies-secure`
+- `profile` / `chromeProfile`: Chrome profile name/path (Cookies DB or profile dir)
 - `firefoxProfile`: Firefox profile name/path
 - `safariCookiesFile`: override path to `Cookies.binarycookies` (tests/debug)
 - Inline sources:
@@ -69,6 +69,7 @@ Env:
 - `SWEET_COOKIE_MODE`: `merge|first`
 - `SWEET_COOKIE_CHROME_PROFILE`, `SWEET_COOKIE_FIREFOX_PROFILE`
 - `SWEET_COOKIE_ORACLE_FALLBACK`: `1`
+- Linux-only: `SWEET_COOKIE_LINUX_KEYRING=gnome|kwallet|basic`, `SWEET_COOKIE_CHROME_SAFE_STORAGE_PASSWORD=...`
 
 ## Inline Cookie Payload
 
@@ -113,13 +114,16 @@ Security stance:
 
 ## Troubleshooting
 
-Native deps (Chrome reads):
-- `chrome-cookies-secure` pulls in native `sqlite3` + `keytar`.
-- If install/rebuild hurts, use the extension export.
+Chrome reads:
+- Uses runtime SQLite (`node:sqlite` / `bun:sqlite`), no npm native deps.
+- Requires OS helpers:
+  - macOS: `security` (Keychain)
+  - Windows: `powershell` (DPAPI unwrap)
+  - Linux: `secret-tool` (GNOME) or `kwallet-query` + `dbus-send` (KDE) for v11 cookies
+- If cookies are “app-bound” / unreadable, use the extension export.
 
 Bun:
-- `bun:sqlite` is used for Firefox (and Chrome mac fallback).
-- Chrome via `chrome-cookies-secure` is optional; if native deps hurt, prefer extension exports.
+- `bun:sqlite` is used when running under Bun (Chrome/Firefox).
 
 Firefox:
 - uses `node:sqlite` (Node) or `bun:sqlite` (Bun).

@@ -4,7 +4,7 @@ export function normalizeExpiration(expires) {
     const value = Number(expires);
     if (value <= 0)
         return undefined;
-    // chrome-cookies-secure sometimes returns Chromium timestamps (microseconds since 1601).
+    // Chromium can use microseconds since 1601 (Windows epoch) in sqlite stores.
     if (value > 10_000_000_000_000) {
         return Math.round(value / 1_000_000 - 11_644_473_600);
     }

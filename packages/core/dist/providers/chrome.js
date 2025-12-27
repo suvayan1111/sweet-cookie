@@ -1,26 +1,26 @@
-import { getCookiesFromChrome as getCookiesFromChromeCookiesSecure } from './chromeCookiesSecure.js';
+import { getCookiesFromChromeSqliteLinux } from './chromeSqliteLinux.js';
 import { getCookiesFromChromeSqliteMac } from './chromeSqliteMac.js';
+import { getCookiesFromChromeSqliteWindows } from './chromeSqliteWindows.js';
 export async function getCookiesFromChrome(options, origins, allowlistNames) {
     const warnings = [];
-    const primary = await getCookiesFromChromeCookiesSecure(options, origins, allowlistNames);
-    warnings.push(...primary.warnings);
-    if (primary.cookies.length) {
-        return { cookies: primary.cookies, warnings };
+    if (process.platform === 'darwin') {
+        const r = await getCookiesFromChromeSqliteMac(options, origins, allowlistNames);
+        warnings.push(...r.warnings);
+        const cookies = r.cookies;
+        return { cookies, warnings };
     }
-    /* c8 ignore next */
-    if (process.platform !== 'darwin') {
-        return { cookies: [], warnings };
+    if (process.platform === 'linux') {
+        const r = await getCookiesFromChromeSqliteLinux(options, origins, allowlistNames);
+        warnings.push(...r.warnings);
+        const cookies = r.cookies;
+        return { cookies, warnings };
     }
-    const fallbackOptions = {};
-    if (options.profile)
-        fallbackOptions.profile = options.profile;
-    if (options.includeExpired !== undefined)
-        fallbackOptions.includeExpired = options.includeExpired;
-    if (options.debug !== undefined)
-        fallbackOptions.debug = options.debug;
-    const fallback = await getCookiesFromChromeSqliteMac(fallbackOptions, origins, allowlistNames);
-    warnings.push(...fallback.warnings);
-    const cookies = fallback.cookies;
-    return { cookies, warnings };
+    if (process.platform === 'win32') {
+        const r = await getCookiesFromChromeSqliteWindows(options, origins, allowlistNames);
+        warnings.push(...r.warnings);
+        const cookies = r.cookies;
+        return { cookies, warnings };
+    }
+    return { cookies: [], warnings };
 }
 //# sourceMappingURL=chrome.js.map

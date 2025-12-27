@@ -1,0 +1,299 @@
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import type { Cookie, CookieSameSite, GetCookiesResult } from '../../types.js';
+import { normalizeExpiration } from '../../util/expire.js';
+import { hostMatchesCookieDomain } from '../../util/hostMatch.js';
+import { isBunRuntime } from '../../util/runtime.js';
+
+type ChromeRow = {
+	name?: unknown;
+	value?: unknown;
+	host_key?: unknown;
+	path?: unknown;
+	expires_utc?: unknown;
+	is_secure?: unknown;
+	is_httponly?: unknown;
+	samesite?: unknown;
+	encrypted_value?: unknown;
+};
+
+export async function getCookiesFromChromeSqliteDb(
+	options: { dbPath: string; profile?: string; includeExpired?: boolean; debug?: boolean },
+	origins: string[],
+	allowlistNames: Set<string> | null,
+	decrypt: (encryptedValue: Uint8Array, options: { stripHashPrefix: boolean }) => string | null
+): Promise<GetCookiesResult> {
+	const warnings: string[] = [];
+
+	const tempDir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-chrome-'));
+	const tempDbPath = path.join(tempDir, 'Cookies');
+	try {
+		copyFileSync(options.dbPath, tempDbPath);
+		copySidecar(options.dbPath, `${tempDbPath}-wal`, '-wal');
+		copySidecar(options.dbPath, `${tempDbPath}-shm`, '-shm');
+	} catch (error) {
+		rmSync(tempDir, { recursive: true, force: true });
+		warnings.push(
+			`Failed to copy Chrome cookie DB: ${error instanceof Error ? error.message : String(error)}`
+		);
+		return { cookies: [], warnings };
+	}
+
+	try {
+		const hosts = origins.map((o) => new URL(o).hostname);
+		const where = buildHostWhereClause(hosts, 'host_key');
+
+		const metaVersion = await readChromiumMetaVersion(tempDbPath);
+		const stripHashPrefix = metaVersion >= 24;
+
+		const rowsResult = await readChromeRows(tempDbPath, where);
+		if (!rowsResult.ok) {
+			warnings.push(rowsResult.error);
+			return { cookies: [], warnings };
+		}
+
+		const collectOptions: { profile?: string; includeExpired?: boolean } = {};
+		if (options.profile) collectOptions.profile = options.profile;
+		if (options.includeExpired !== undefined)
+			collectOptions.includeExpired = options.includeExpired;
+
+		const cookies = collectChromeCookiesFromRows(
+			rowsResult.rows,
+			collectOptions,
+			hosts,
+			allowlistNames,
+			(encryptedValue) => decrypt(encryptedValue, { stripHashPrefix }),
+			warnings
+		);
+
+		return { cookies: dedupeCookies(cookies), warnings };
+	} finally {
+		rmSync(tempDir, { recursive: true, force: true });
+	}
+}
+
+function collectChromeCookiesFromRows(
+	rows: ChromeRow[],
+	options: { profile?: string; includeExpired?: boolean },
+	hosts: string[],
+	allowlistNames: Set<string> | null,
+	decrypt: (encryptedValue: Uint8Array) => string | null,
+	warnings: string[]
+): Cookie[] {
+	const cookies: Cookie[] = [];
+	const now = Math.floor(Date.now() / 1000);
+	let warnedEncryptedType = false;
+
+	for (const row of rows) {
+		const name = typeof row.name === 'string' ? row.name : null;
+		if (!name) continue;
+		if (allowlistNames && allowlistNames.size > 0 && !allowlistNames.has(name)) continue;
+
+		const hostKey = typeof row.host_key === 'string' ? row.host_key : null;
+		if (!hostKey) continue;
+		if (!hostMatchesAny(hosts, hostKey)) continue;
+
+		const rowPath = typeof row.path === 'string' ? row.path : '';
+
+		const valueString = typeof row.value === 'string' ? row.value : null;
+		let value: string | null = valueString;
+		if (value === null || value.length === 0) {
+			const encryptedBytes = getEncryptedBytes(row);
+			if (!encryptedBytes) {
+				if (!warnedEncryptedType && row.encrypted_value !== undefined) {
+					warnings.push('Chrome cookie encrypted_value is in an unsupported type.');
+					warnedEncryptedType = true;
+				}
+				continue;
+			}
+			value = decrypt(encryptedBytes);
+		}
+		if (value === null) continue;
+
+		const expiresRaw =
+			typeof row.expires_utc === 'number' ? row.expires_utc : tryParseInt(row.expires_utc);
+		const expires = normalizeExpiration(expiresRaw ?? undefined);
+
+		if (!options.includeExpired) {
+			if (expires && expires < now) continue;
+		}
+
+		const secure = row.is_secure === 1 || row.is_secure === '1' || row.is_secure === true;
+		const httpOnly = row.is_httponly === 1 || row.is_httponly === '1' || row.is_httponly === true;
+
+		const sameSite = normalizeChromiumSameSite(row.samesite);
+
+		const source: NonNullable<Cookie['source']> = { browser: 'chrome' };
+		if (options.profile) source.profile = options.profile;
+
+		const cookie: Cookie = {
+			name,
+			value,
+			domain: hostKey.startsWith('.') ? hostKey.slice(1) : hostKey,
+			path: rowPath || '/',
+			secure,
+			httpOnly,
+			source,
+		};
+		if (expires !== undefined) cookie.expires = expires;
+		if (sameSite !== undefined) cookie.sameSite = sameSite;
+
+		cookies.push(cookie);
+	}
+
+	return cookies;
+}
+
+function tryParseInt(value: unknown): number | null {
+	if (typeof value !== 'string') return null;
+	const parsed = Number.parseInt(value, 10);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeChromiumSameSite(value: unknown): CookieSameSite | undefined {
+	if (typeof value === 'number') {
+		if (value === 2) return 'Strict';
+		if (value === 1) return 'Lax';
+		if (value === 0) return 'None';
+		return undefined;
+	}
+	if (typeof value === 'string') {
+		const parsed = Number.parseInt(value, 10);
+		if (Number.isFinite(parsed)) return normalizeChromiumSameSite(parsed);
+		const normalized = value.toLowerCase();
+		if (normalized === 'strict') return 'Strict';
+		if (normalized === 'lax') return 'Lax';
+		if (normalized === 'none' || normalized === 'no_restriction') return 'None';
+	}
+	return undefined;
+}
+
+function getEncryptedBytes(row: ChromeRow): Uint8Array | null {
+	const raw = row.encrypted_value;
+	if (raw instanceof Uint8Array) return raw;
+	return null;
+}
+
+async function readChromiumMetaVersion(dbPath: string): Promise<number> {
+	const sql = `SELECT value FROM meta WHERE key = "version"`;
+	const result = isBunRuntime()
+		? await queryNodeOrBun({ kind: 'bun', dbPath, sql })
+		: await queryNodeOrBun({ kind: 'node', dbPath, sql });
+	if (!result.ok) return 0;
+	const first = result.rows[0] as { value?: unknown } | undefined;
+	const value = first?.value;
+	if (typeof value === 'number') return Math.floor(value);
+	if (typeof value === 'string') {
+		const parsed = Number.parseInt(value, 10);
+		return Number.isFinite(parsed) ? parsed : 0;
+	}
+	return 0;
+}
+
+async function readChromeRows(
+	dbPath: string,
+	where: string
+): Promise<{ ok: true; rows: ChromeRow[] } | { ok: false; error: string }> {
+	const sqliteKind = isBunRuntime() ? 'bun' : 'node';
+	const sqliteLabel = sqliteKind === 'bun' ? 'bun:sqlite' : 'node:sqlite';
+
+	const baseSelect =
+		`SELECT name, value, host_key, path, expires_utc, samesite, encrypted_value, ` +
+		`{SECURE} AS is_secure, {HTTPONLY} AS is_httponly ` +
+		`FROM cookies WHERE (${where}) ORDER BY expires_utc DESC;`;
+
+	const queries = [
+		baseSelect.replace('{SECURE}', 'is_secure').replace('{HTTPONLY}', 'is_httponly'),
+		baseSelect.replace('{SECURE}', 'secure').replace('{HTTPONLY}', 'httponly'),
+	];
+
+	for (const sql of queries) {
+		const result = await queryNodeOrBun({ kind: sqliteKind, dbPath, sql });
+		if (result.ok) return { ok: true, rows: result.rows as ChromeRow[] };
+		if (!looksLikeMissingColumnError(result.error)) {
+			return {
+				ok: false,
+				error: `${sqliteLabel} failed reading Chrome cookies: ${result.error}`,
+			};
+		}
+	}
+
+	return { ok: false, error: 'Failed reading Chrome cookies: unsupported cookies schema.' };
+}
+
+function looksLikeMissingColumnError(error: string): boolean {
+	return error.toLowerCase().includes('no such column');
+}
+
+async function queryNodeOrBun(options: {
+	kind: 'node' | 'bun';
+	dbPath: string;
+	sql: string;
+}): Promise<{ ok: true; rows: Array<Record<string, unknown>> } | { ok: false; error: string }> {
+	try {
+		if (options.kind === 'node') {
+			const { DatabaseSync } = await import('node:sqlite');
+			const db = new DatabaseSync(options.dbPath, { readOnly: true });
+			try {
+				const rows = db.prepare(options.sql).all() as Array<Record<string, unknown>>;
+				return { ok: true, rows };
+			} finally {
+				db.close();
+			}
+		}
+		const { Database } = await import('bun:sqlite');
+		const db = new Database(options.dbPath, { readonly: true });
+		try {
+			const rows = db.query(options.sql).all() as Array<Record<string, unknown>>;
+			return { ok: true, rows };
+		} finally {
+			db.close();
+		}
+	} catch (error) {
+		return { ok: false, error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+function copySidecar(sourceDbPath: string, target: string, suffix: '-wal' | '-shm'): void {
+	const sidecar = `${sourceDbPath}${suffix}`;
+	if (!existsSync(sidecar)) return;
+	try {
+		copyFileSync(sidecar, target);
+	} catch {
+		// ignore
+	}
+}
+
+function buildHostWhereClause(hosts: string[], column: 'host_key'): string {
+	const clauses: string[] = [];
+	for (const host of hosts) {
+		const escaped = sqlLiteral(host);
+		const escapedDot = sqlLiteral(`.${host}`);
+		const escapedLike = sqlLiteral(`%.${host}`);
+		clauses.push(`${column} = ${escaped}`);
+		clauses.push(`${column} = ${escapedDot}`);
+		clauses.push(`${column} LIKE ${escapedLike}`);
+	}
+	return clauses.length ? clauses.join(' OR ') : '1=0';
+}
+
+function sqlLiteral(value: string): string {
+	const escaped = value.replaceAll("'", "''");
+	return `'${escaped}'`;
+}
+
+function hostMatchesAny(hosts: string[], cookieHost: string): boolean {
+	const cookieDomain = cookieHost.startsWith('.') ? cookieHost.slice(1) : cookieHost;
+	return hosts.some((host) => hostMatchesCookieDomain(host, cookieDomain));
+}
+
+function dedupeCookies(cookies: Cookie[]): Cookie[] {
+	const merged = new Map<string, Cookie>();
+	for (const cookie of cookies) {
+		const key = `${cookie.name}|${cookie.domain ?? ''}|${cookie.path ?? ''}`;
+		if (!merged.has(key)) merged.set(key, cookie);
+	}
+	return Array.from(merged.values());
+}

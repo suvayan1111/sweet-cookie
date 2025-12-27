@@ -44,9 +44,12 @@ High-signal options:
 1) Inline sources (if any). First non-empty wins.
 2) Local browsers in declared order:
    - **Chrome**
-     - `chrome-cookies-secure` if installed + loadable (optional dependency)
-     - macOS fallback: copy DB → query via `node:sqlite` (Node) or `bun:sqlite` (Bun) → decrypt via Keychain `security` (Chrome Safe Storage)
-     - Windows: expect failures; prefer inline/export
+     - copy DB → query via `node:sqlite` (Node) or `bun:sqlite` (Bun)
+     - decrypt:
+       - macOS: Keychain `security` (Chrome Safe Storage)
+       - Windows: DPAPI unwrap (Local State) + AES-GCM
+       - Linux: v10 (peanuts) + v11 (keyring via `secret-tool` or `kwallet-query` + `dbus-send`)
+     - app-bound cookies: expect failures; prefer inline/export
    - **Firefox**
      - Bun: `bun:sqlite`
      - Node: `node:sqlite`

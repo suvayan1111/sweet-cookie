@@ -1,57 +1,60 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-	secureMock: vi.fn(),
-	sqliteMock: vi.fn(),
-}));
-
-vi.mock('../src/providers/chromeCookiesSecure.js', () => ({
-	getCookiesFromChrome: mocks.secureMock,
+	macMock: vi.fn(),
+	linuxMock: vi.fn(),
+	windowsMock: vi.fn(),
 }));
 
 vi.mock('../src/providers/chromeSqliteMac.js', () => ({
-	getCookiesFromChromeSqliteMac: mocks.sqliteMock,
+	getCookiesFromChromeSqliteMac: mocks.macMock,
+}));
+
+vi.mock('../src/providers/chromeSqliteLinux.js', () => ({
+	getCookiesFromChromeSqliteLinux: mocks.linuxMock,
+}));
+
+vi.mock('../src/providers/chromeSqliteWindows.js', () => ({
+	getCookiesFromChromeSqliteWindows: mocks.windowsMock,
 }));
 
 import { getCookiesFromChrome } from '../src/providers/chrome.js';
 
 describe('chrome provider (auto)', () => {
 	beforeEach(() => {
-		mocks.secureMock.mockReset();
-		mocks.sqliteMock.mockReset();
+		mocks.macMock.mockReset();
+		mocks.linuxMock.mockReset();
+		mocks.windowsMock.mockReset();
 	});
 
-	it('returns primary cookies when available', async () => {
-		mocks.secureMock.mockResolvedValueOnce({
+	it('delegates to the platform provider', async () => {
+		mocks.macMock.mockResolvedValueOnce({
 			cookies: [{ name: 'a', value: 'b', domain: 'example.com', path: '/' }],
-			warnings: ['w1'],
+			warnings: ['w-mac'],
 		});
-		mocks.sqliteMock.mockResolvedValueOnce({ cookies: [], warnings: ['w2'] });
+		mocks.linuxMock.mockResolvedValueOnce({
+			cookies: [{ name: 'a', value: 'b', domain: 'example.com', path: '/' }],
+			warnings: ['w-linux'],
+		});
+		mocks.windowsMock.mockResolvedValueOnce({
+			cookies: [{ name: 'a', value: 'b', domain: 'example.com', path: '/' }],
+			warnings: ['w-win'],
+		});
 
 		const res = await getCookiesFromChrome({}, ['https://example.com/'], null);
 
 		expect(res.cookies).toHaveLength(1);
-		expect(res.warnings).toEqual(['w1']);
-		expect(mocks.sqliteMock).not.toHaveBeenCalled();
-	});
-
-	it('falls back when primary is empty (darwin only)', async () => {
-		mocks.secureMock.mockResolvedValueOnce({ cookies: [], warnings: ['w1'] });
-		mocks.sqliteMock.mockResolvedValueOnce({
-			cookies: [{ name: 'a', value: 'b', domain: 'example.com', path: '/' }],
-			warnings: ['w2'],
-		});
-
-		const res = await getCookiesFromChrome({}, ['https://example.com/'], null);
-
 		if (process.platform === 'darwin') {
-			expect(mocks.sqliteMock).toHaveBeenCalled();
-			expect(res.cookies).toHaveLength(1);
-			expect(res.warnings).toEqual(['w1', 'w2']);
+			expect(mocks.macMock).toHaveBeenCalled();
+			expect(res.warnings).toEqual(['w-mac']);
+		} else if (process.platform === 'linux') {
+			expect(mocks.linuxMock).toHaveBeenCalled();
+			expect(res.warnings).toEqual(['w-linux']);
+		} else if (process.platform === 'win32') {
+			expect(mocks.windowsMock).toHaveBeenCalled();
+			expect(res.warnings).toEqual(['w-win']);
 		} else {
-			expect(mocks.sqliteMock).not.toHaveBeenCalled();
 			expect(res.cookies).toHaveLength(0);
-			expect(res.warnings).toEqual(['w1']);
 		}
 	});
 });
