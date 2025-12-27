@@ -1,5 +1,3 @@
-import { homedir } from 'node:os';
-import path from 'node:path';
 import { getCookiesFromChrome } from './providers/chrome.js';
 import { getCookiesFromFirefox } from './providers/firefoxSqlite.js';
 import { getCookiesFromInline } from './providers/inline.js';
@@ -15,6 +13,21 @@ import { normalizeOrigins } from './util/origins.js';
 
 const DEFAULT_BROWSERS: BrowserName[] = ['chrome', 'safari', 'firefox'];
 
+/**
+ * Read cookies for a URL from one or more browser backends (and/or inline payloads).
+ *
+ * Supported backends:
+ * - `chrome`: macOS / Windows / Linux (Chromium-based; default discovery targets Google Chrome paths)
+ * - `firefox`: macOS / Windows / Linux
+ * - `safari`: macOS only (`Cookies.binarycookies`)
+ *
+ * Runtime requirements:
+ * - Node >= 22 (uses `node:sqlite`) or Bun (uses `bun:sqlite`)
+ *
+ * The function returns `{ cookies, warnings }`:
+ * - `cookies`: best-effort results, filtered by `url`/`origins` and optional `names` allowlist
+ * - `warnings`: non-fatal diagnostics (no raw cookie values)
+ */
 export async function getCookies(options: GetCookiesOptions): Promise<GetCookiesResult> {
 	const warnings: string[] = [];
 	const url = options.url;
@@ -91,6 +104,12 @@ export async function getCookies(options: GetCookiesOptions): Promise<GetCookies
 	return { cookies: Array.from(merged.values()), warnings };
 }
 
+/**
+ * Convert cookies to an HTTP `Cookie` header value.
+ *
+ * This is a helper for typical Node fetch clients / HTTP libraries.
+ * It does not validate cookie RFC edge cases; it simply joins `name=value` pairs.
+ */
 export function toCookieHeader(
 	cookies: readonly Cookie[],
 	options: CookieHeaderOptions = {}
@@ -142,17 +161,6 @@ async function resolveInlineSources(
 		sources.push({ source: 'inline-file', payload: options.inlineCookiesFile });
 	}
 
-	const oracleInlineFallback =
-		options.oracleInlineFallback ?? readBoolEnv('SWEET_COOKIE_ORACLE_FALLBACK');
-	if (oracleInlineFallback) {
-		const oracleHome = path.join(homedir(), '.oracle');
-		sources.push({ source: 'oracle-default-json', payload: path.join(oracleHome, 'cookies.json') });
-		sources.push({
-			source: 'oracle-default-base64',
-			payload: path.join(oracleHome, 'cookies.base64'),
-		});
-	}
-
 	return sources;
 }
 
@@ -184,13 +192,4 @@ function readEnv(key: string): string | undefined {
 	const value = process.env[key];
 	const trimmed = typeof value === 'string' ? value.trim() : '';
 	return trimmed.length ? trimmed : undefined;
-}
-
-function readBoolEnv(key: string): boolean | undefined {
-	const value = readEnv(key);
-	if (!value) return undefined;
-	if (value === '1' || value.toLowerCase() === 'true' || value.toLowerCase() === 'yes') return true;
-	if (value === '0' || value.toLowerCase() === 'false' || value.toLowerCase() === 'no')
-		return false;
-	return undefined;
 }

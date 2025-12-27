@@ -1,141 +1,124 @@
 # Sweet Cookie
 
-Cookie extraction, Peter-style: boring API, lots of escape hatches.
+Small, dependency-light cookie extraction for local tooling.
 
-Two deliverables:
-- `@steipete/sweet-cookie` (Node): unified cookie read API (Chrome/Firefox/Safari + inline payloads).
-- `apps/extension` (Chrome MV3): cookie exporter for when native readers fail (copy JSON/base64, download file).
+It’s built around two ideas:
+1) **Prefer inline cookies** when you can (most reliable, works everywhere).
+2) **Best-effort local reads** when you want zero-manual steps.
 
 ## Why
 
-We keep hitting three realities:
-- Chrome cookies: “secure / app-bound” + encryption + profile DB locks.
-- Native deps: rebuilds + ABI + runtime differences (Node vs Bun).
-- Most tools only need “cookie params”, not a whole browser automation stack.
+Browser cookies are hard in practice:
+- Profile databases can be locked while the browser is running.
+- Values may be encrypted (Keychain/DPAPI/keyring).
+- Native addons (`sqlite3`, `keytar`, …) are a constant source of rebuild/ABI pain across Node/Bun and CI.
 
-Sweet Cookie standardizes on one flow:
-1) Inline cookies (exported by the extension) — most reliable.
-2) Best-effort local reads:
-   - Chrome: runtime SQLite (`node:sqlite` / `bun:sqlite`) + OS key storage (Keychain/DPAPI/keyring)
-   - Firefox: `node:sqlite` (Node) or `bun:sqlite` (Bun)
-   - Safari: binarycookies parsing
+Sweet Cookie avoids native Node addons by design:
+- SQLite: `node:sqlite` (Node) or `bun:sqlite` (Bun)
+- OS integration: shelling out to platform tools with timeouts (`security`, `powershell`, `secret-tool`, `kwallet-query`)
 
-## Install
+## What’s included
 
-Requirements:
-- Node `>=22` (repo default)
-- `pnpm`
-- No external `sqlite3` CLI needed (uses runtime SQLite: `node:sqlite` / `bun:sqlite`)
+- `@steipete/sweet-cookie`: the library (`getCookies()`, `toCookieHeader()`).
+- `apps/extension`: a Chrome MV3 exporter that produces an inline cookie payload (JSON/base64/file) for the cases where local reads can’t work (app-bound cookies, keychain prompts, remote machines, etc.).
+
+## Requirements
+
+- Node `>=22` (for `node:sqlite`) or Bun (for `bun:sqlite`)
+- Local usage only: this reads from your machine’s browser profiles.
+
+## Install (repo)
 
 ```bash
 pnpm i
 ```
 
-## Node API
+## Library usage
+
+Minimal: read a couple cookies and build a header.
 
 ```ts
 import { getCookies, toCookieHeader } from '@steipete/sweet-cookie';
 
 const { cookies, warnings } = await getCookies({
-  url: 'https://chatgpt.com/',
-  names: ['__Secure-next-auth.session-token'],
-  browsers: ['chrome', 'safari', 'firefox'],
-
-  // Chrome:
-  profile: 'Default', // alias for chromeProfile
-
-  // Inline “escape hatch”:
-  oracleInlineFallback: true,
+  url: 'https://example.com/',
+  names: ['session', 'csrf'],
+  browsers: ['chrome', 'firefox', 'safari'],
 });
 
-const header = toCookieHeader(cookies, { dedupeByName: true });
+for (const warning of warnings) console.warn(warning);
+
+const cookieHeader = toCookieHeader(cookies, { dedupeByName: true });
 ```
 
-Options (high-signal):
-- `url`: target URL (drives default origin filtering)
-- `origins`: extra origins to consider (OAuth, etc)
-- `names`: allowlist cookie names
-- `browsers`: source order (`chrome|safari|firefox`)
-- `mode`: `merge` (default) or `first`
-- `profile` / `chromeProfile`: Chrome profile name/path (Cookies DB or profile dir)
-- `firefoxProfile`: Firefox profile name/path
-- `safariCookiesFile`: override path to `Cookies.binarycookies` (tests/debug)
-- Inline sources:
-  - `inlineCookiesJson`, `inlineCookiesBase64`, `inlineCookiesFile`
-  - `oracleInlineFallback`: also tries `~/.oracle/cookies.{json,base64}`
+Multiple origins (common with OAuth / SSO redirects):
 
-Env:
+```ts
+const { cookies } = await getCookies({
+  url: 'https://app.example.com/',
+  origins: ['https://accounts.example.com/', 'https://login.example.com/'],
+  names: ['session', 'xsrf'],
+  browsers: ['chrome'],
+  mode: 'merge',
+});
+```
+
+Pick a specific profile or pass an explicit Chrome cookie DB path:
+
+```ts
+await getCookies({
+  url: 'https://example.com/',
+  browsers: ['chrome'],
+  chromeProfile: 'Default', // or '/path/to/.../Network/Cookies'
+});
+```
+
+Inline cookies (works on any OS/runtime; no browser DB access required):
+
+```ts
+await getCookies({
+  url: 'https://example.com/',
+  browsers: ['chrome'],
+  inlineCookiesFile: '/path/to/cookies.json', // or inlineCookiesJson / inlineCookiesBase64
+});
+```
+
+## Supported browsers / platforms
+
+- `chrome` (Chromium-based): macOS / Windows / Linux
+  - Default discovery targets Google Chrome paths.
+  - Other Chromium browsers typically work by passing `chromeProfile` as an explicit `Cookies` DB path.
+- `firefox`: macOS / Windows / Linux
+- `safari`: macOS only (reads `Cookies.binarycookies`)
+
+## Options (high-signal)
+
+- `url` (required): base URL used for origin filtering.
+- `origins`: additional origins to consider (deduped).
+- `names`: allowlist cookie names.
+- `browsers`: source order (`chrome`, `firefox`, `safari`).
+- `mode`: `merge` (default) or `first`.
+- `chromeProfile`: Chrome profile name/path (profile dir or `Cookies` DB file).
+- `firefoxProfile`: Firefox profile name/path.
+- `safariCookiesFile`: override path to `Cookies.binarycookies` (tests/debug).
+- Inline sources: `inlineCookiesJson`, `inlineCookiesBase64`, `inlineCookiesFile`.
+- `timeoutMs`: max time for OS helper calls (keychain/keyring/DPAPI).
+- `includeExpired`: include expired cookies in results.
+- `debug`: add extra provider warnings (no raw cookie values).
+
+## Env
+
 - `SWEET_COOKIE_BROWSERS` / `SWEET_COOKIE_SOURCES`: `chrome,safari,firefox`
 - `SWEET_COOKIE_MODE`: `merge|first`
 - `SWEET_COOKIE_CHROME_PROFILE`, `SWEET_COOKIE_FIREFOX_PROFILE`
-- `SWEET_COOKIE_ORACLE_FALLBACK`: `1`
 - Linux-only: `SWEET_COOKIE_LINUX_KEYRING=gnome|kwallet|basic`, `SWEET_COOKIE_CHROME_SAFE_STORAGE_PASSWORD=...`
 
-## Inline Cookie Payload
+## Inline cookie payload format
 
-Accepts either:
-- a plain `Cookie[]`
-- or `{ cookies: Cookie[] }`
+Sweet Cookie accepts either a plain `Cookie[]` or `{ cookies: Cookie[] }`.
+The extension export format is documented in `docs/spec.md`.
 
-This matches the extension export (`docs/spec.md`) and is close to CDP cookie params:
-
-```jsonc
-{
-  "version": 1,
-  "generatedAt": "2025-12-27T18:00:00.000Z",
-  "source": "sweet-cookie",
-  "browser": "chrome",
-  "targetUrl": "https://chatgpt.com/",
-  "origins": ["https://chatgpt.com/"],
-  "cookies": [{ "name": "sid", "value": "…", "domain": "chatgpt.com", "path": "/" }]
-}
-```
-
-## Chrome Extension (MV3)
-
-Build + load:
-
-```bash
-pnpm -C apps/extension build
-```
-
-Then load `apps/extension/dist` via `chrome://extensions` → “Load unpacked”.
-
-Export modes:
-- Copy JSON
-- Copy base64
-- Download `.json`
-
-Security stance:
-- user gesture only
-- no network calls
-- no logging raw cookie values
-- optional host permissions requested at export time
-
-## Troubleshooting
-
-Chrome reads:
-- Uses runtime SQLite (`node:sqlite` / `bun:sqlite`), no npm native deps.
-- Requires OS helpers:
-  - macOS: `security` (Keychain)
-  - Windows: `powershell` (DPAPI unwrap)
-  - Linux: `secret-tool` (GNOME) or `kwallet-query` + `dbus-send` (KDE) for v11 cookies
-- If cookies are “app-bound” / unreadable, use the extension export.
-
-Bun:
-- `bun:sqlite` is used when running under Bun (Chrome/Firefox).
-
-Firefox:
-- uses `node:sqlite` (Node) or `bun:sqlite` (Bun).
-
-## Related / prior art
-
-- `../sweetlink`: uses `chrome-cookies-secure` for cookie sync (native).
-- `../oracle`: uses `chrome-cookies-secure` for browser-session reuse (native).
-- `../bird` + `../summarize`: domain-specific cookie extraction (sqlite3 CLI + custom parsing).
-- `../oss/get-cookie`: feature-rich, but native-heavy (`better-sqlite3`, etc) and different ergonomics.
-
-## Dev
+## Development
 
 ```bash
 pnpm build
