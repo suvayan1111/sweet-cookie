@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sweet Cookie</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <header>
+      <div class="mark">Sweet Cookie</div>
+      <div class="sub">Cookie export for Oracle/SweetLink</div>
+    </header>
+
+    <main>
+      <label class="field">
+        <div class="label">Target URL</div>
+        <input id="targetUrl" type="url" spellcheck="false" placeholder="https://chatgpt.com/" />
+      </label>
+
+      <label class="field">
+        <div class="label">Extra origins (optional)</div>
+        <textarea
+          id="extraOrigins"
+          rows="3"
+          spellcheck="false"
+          placeholder="https://accounts.google.com/\nhttps://login.microsoftonline.com/"
+        ></textarea>
+      </label>
+
+      <label class="field">
+        <div class="label">Cookie name allowlist (optional)</div>
+        <input id="allowlist" type="text" spellcheck="false" placeholder="__Secure-1PSID, __Secure-1PSIDTS" />
+      </label>
+
+      <div class="row">
+        <button id="btnCopyJson" class="btn primary">Copy JSON</button>
+        <button id="btnCopyBase64" class="btn">Copy base64</button>
+        <button id="btnDownload" class="btn">Download</button>
+      </div>
+
+      <div id="status" class="status"></div>
+
+      <div class="preview">
+        <div class="previewTitle">Preview</div>
+        <div id="previewBody" class="previewBody">—</div>
+      </div>
+    </main>
+
+    <footer>
+      <div class="hint">No network. User-triggered only. Values redacted in UI.</div>
+    </footer>
+
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>
+

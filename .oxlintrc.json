@@ -1,0 +1,11 @@
+{
+	"$schema": "https://oxc.rs/schema/oxlintrc.json",
+	"plugins": ["typescript", "unicorn"],
+	"rules": {
+		"eslint/no-debugger": "error",
+		"eslint/no-unused-vars": "off",
+		"typescript/no-unused-vars": "error",
+		"unicorn/no-array-for-each": "off",
+		"unicorn/no-null": "off"
+	}
+}
