@@ -137,7 +137,7 @@ function getEncryptedBytes(row) {
     return null;
 }
 async function readChromiumMetaVersion(dbPath) {
-    const sql = `SELECT value FROM meta WHERE key = "version"`;
+    const sql = `SELECT value FROM meta WHERE key = 'version'`;
     const result = isBunRuntime()
         ? await queryNodeOrBun({ kind: 'bun', dbPath, sql })
         : await queryNodeOrBun({ kind: 'node', dbPath, sql });
