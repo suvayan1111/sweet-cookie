@@ -6,6 +6,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getCookiesFromFirefox } from '../src/providers/firefoxSqlite.js';
 
+function stubFirefoxProfilesRoot(homeDir: string): string {
+	if (process.platform === 'darwin') {
+		vi.stubEnv('HOME', homeDir);
+		return path.join(homeDir, 'Library', 'Application Support', 'Firefox', 'Profiles');
+	}
+
+	if (process.platform === 'linux') {
+		vi.stubEnv('HOME', homeDir);
+		return path.join(homeDir, '.mozilla', 'firefox');
+	}
+
+	if (process.platform === 'win32') {
+		const appData = path.join(homeDir, 'AppData', 'Roaming');
+		vi.stubEnv('APPDATA', appData);
+		return path.join(appData, 'Mozilla', 'Firefox', 'Profiles');
+	}
+
+	throw new Error(`Unsupported platform: ${process.platform}`);
+}
+
 // biome-ignore lint/suspicious/noExplicitAny: test-only control surface
 const nodeSqlite = vi.hoisted(() => ({ rows: [] as any[], shouldThrow: false }));
 
@@ -99,13 +119,7 @@ describe('firefox sqlite provider', () => {
 	it('resolves profile by name from default Profiles root', async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-firefox-'));
 		const homeDir = path.join(dir, 'home');
-		const profilesRoot = path.join(
-			homeDir,
-			'Library',
-			'Application Support',
-			'Firefox',
-			'Profiles'
-		);
+		const profilesRoot = stubFirefoxProfilesRoot(homeDir);
 		const profileName = 'abc.default-release';
 		const profileDir = path.join(profilesRoot, profileName);
 
@@ -124,8 +138,6 @@ describe('firefox sqlite provider', () => {
 			},
 		];
 
-		vi.stubEnv('HOME', homeDir);
-
 		const res = await getCookiesFromFirefox(
 			{ profile: profileName, includeExpired: true },
 			['https://chatgpt.com/'],
@@ -139,13 +151,7 @@ describe('firefox sqlite provider', () => {
 	it('auto-picks a default-release profile when no profile is specified', async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-firefox-'));
 		const homeDir = path.join(dir, 'home');
-		const profilesRoot = path.join(
-			homeDir,
-			'Library',
-			'Application Support',
-			'Firefox',
-			'Profiles'
-		);
+		const profilesRoot = stubFirefoxProfilesRoot(homeDir);
 		const defaultRelease = path.join(profilesRoot, 'abc.default-release');
 		const other = path.join(profilesRoot, 'xyz.default');
 		mkdirSync(defaultRelease, { recursive: true });
@@ -165,8 +171,6 @@ describe('firefox sqlite provider', () => {
 				sameSite: 2,
 			},
 		];
-
-		vi.stubEnv('HOME', homeDir);
 
 		const res = await getCookiesFromFirefox(
 			{ includeExpired: true },
