@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { getCookiesFromChrome } from './providers/chromeCookiesSecure.js';
+import { getCookiesFromChrome } from './providers/chrome.js';
 import { getCookiesFromFirefox } from './providers/firefoxSqlite.js';
 import { getCookiesFromInline } from './providers/inline.js';
 import { getCookiesFromSafari } from './providers/safariBinaryCookies.js';

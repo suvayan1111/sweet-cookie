@@ -10,5 +10,5 @@
 		"moduleResolution": "NodeNext",
 		"module": "NodeNext"
 	},
-	"include": ["./src/**/*.ts"]
+	"include": ["./src/**/*.ts", "./src/**/*.d.ts"]
 }

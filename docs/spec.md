@@ -1,19 +1,66 @@
-# Sweet Cookie — Cookie Extraction Spec
+# Sweet Cookie Brunch — Cookie Extraction Spec
 
 ## Goal
 
-Ship a small Chrome/Chromium extension that exports cookies from the *current browser profile* for a target URL (and optional extra origins), in formats directly consumable by Peter’s tools (Oracle, SweetLink, etc.).
+Standardize cookie extraction across Peter’s TypeScript tools:
+- `@steipete/sweet-cookie` (library): one API to load cookies from inline payloads + local browsers.
+- `apps/extension` (Chrome MV3): “escape hatch” exporter for cases where native/DB reads fail.
 
 Primary use-cases:
-- Windows/locked-down environments where DB-based cookie sync is flaky (DPAPI/app-bound cookies, keychain prompts, native module rebuilds).
-- “One click” cookie handoff to CLI tools without asking users to paste from DevTools.
+- One implementation used by `oracle`, `sweetlink`, `summarize`, etc.
+- Escape hatches for “native module pain” (Node vs Bun vs CI) + keychain prompts.
+- Windows/locked-down environments where DB-based reads are flaky (DPAPI/app-bound cookies) → extension export.
 
 ## Non-goals
 
-- Reading cookie DBs on disk (that’s `chrome-cookies-secure` / native-land).
-- Cross-profile extraction (extensions can’t read cookies from other Chrome profiles).
-- Bypassing browser security boundaries (we only read what the extension has permission to read).
-- Headless automation. This is a user-triggered export tool.
+- Re-implement every Chromium encryption scheme across platforms.
+- Cross-profile extraction via the extension (extensions can’t read other Chrome profiles).
+- Bypassing browser security boundaries (extension reads only what it’s permitted to read).
+- Headless automation. (Library is “read cookies”, not “drive browser”.)
+
+## Library (`@steipete/sweet-cookie`)
+
+### API surface
+
+Exports:
+- `getCookies(options: GetCookiesOptions): Promise<{ cookies: Cookie[]; warnings: string[] }>`
+- `toCookieHeader(cookies: Cookie[], options?): string`
+
+High-signal options:
+- `url`: primary target URL (host drives filtering)
+- `origins`: extra origins (OAuth, multi-domain auth)
+- `names`: allowlist cookie names
+- `browsers`: ordered sources (`chrome|safari|firefox`)
+- `mode`: `merge` (default) or `first`
+- `profile` / `chromeProfile`: Chrome profile name/path
+- `firefoxProfile`: Firefox profile name/path
+- `includeExpired`: include expired cookies
+- Inline inputs (escape hatch):
+  - `inlineCookiesJson`, `inlineCookiesBase64`, `inlineCookiesFile`
+  - `oracleInlineFallback`: also tries `~/.oracle/cookies.{json,base64}`
+
+### Provider order
+
+1) Inline sources (if any). First non-empty wins.
+2) Local browsers in declared order:
+   - **Chrome**
+     - `chrome-cookies-secure` if installed + loadable (optional dependency)
+     - macOS fallback: copy DB → query via `sqlite3` CLI (Node) or `bun:sqlite` (Bun) → decrypt via Keychain `security` (Chrome Safe Storage)
+     - Windows: expect failures; prefer inline/export
+   - **Firefox**
+     - Bun: `bun:sqlite` (no native Node sqlite bindings)
+     - Node: `sqlite3` CLI (no node-sqlite3 dependency)
+   - **Safari**
+     - parse `Cookies.binarycookies` directly (no WebKit db dependency)
+
+### Output contract
+
+`Cookie[]` is “CDP-ish” and tool-friendly:
+- `name`, `value`, `domain`, `path`
+- optional: `expires` (unix seconds), `secure`, `httpOnly`, `sameSite`
+- `source` includes `browser` and optional `profile` (for debugging)
+
+## Extension (`apps/extension`)
 
 ## Outputs (formats)
 
@@ -158,4 +205,3 @@ SweetLink currently syncs via `chrome-cookies-secure` (native). Sweet Cookie is 
 - Do we want a “cookie names allowlist” preset per target (ChatGPT/Gemini/X), or always export all and let tools filter?
 - Do we ship a CLI companion (`sweet-cookie dump --url …`) that talks to the extension via native messaging / localhost? (likely no; keep extension-only first.)
 - Should we support multiple cookie stores (`storeId`) explicitly, or just merge everything? (default merge.)
-

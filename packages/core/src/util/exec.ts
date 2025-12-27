@@ -29,6 +29,15 @@ export async function execCapture(
 		}, timeoutMs);
 		timer.unref?.();
 
+		child.on('error', (error) => {
+			clearTimeout(timer);
+			resolve({
+				code: 127,
+				stdout,
+				stderr: `${stderr}\n${error instanceof Error ? error.message : String(error)}`,
+			});
+		});
+
 		child.on('close', (code) => {
 			clearTimeout(timer);
 			resolve({ code: code ?? 0, stdout, stderr });

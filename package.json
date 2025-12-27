@@ -8,6 +8,7 @@
 		"lint": "biome check . && oxlint --type-aware --tsconfig tsconfig.lint.json --config .oxlintrc.json .",
 		"format": "biome format --write .",
 		"test": "vitest run --coverage",
+		"test:bun": "bun test packages/core/tests-bun",
 		"test:watch": "vitest",
 		"typecheck": "pnpm -r typecheck"
 	},

@@ -70,6 +70,127 @@ describe('firefox sqlite provider', () => {
 		expect(res.cookies[0]?.sameSite).toBe('Strict');
 	});
 
+	it('accepts a direct cookies.sqlite path', async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-firefox-'));
+		const dbDir = path.join(dir, 'profile');
+		const binDir = path.join(dir, 'bin');
+		mkdirSync(dbDir, { recursive: true });
+		const dbPath = path.join(dbDir, 'cookies.sqlite');
+		writeFileSync(dbPath, '', 'utf8');
+
+		writeSqlite3Stub(
+			binDir,
+			'sid\u001Fvalue\u001F.chatgpt.com\u001F/\u001F9999999999\u001F1\u001F1\u001F2\n'
+		);
+
+		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+
+		const res = await getCookiesFromFirefox(
+			{ profile: dbPath, includeExpired: true },
+			['https://chatgpt.com/'],
+			null
+		);
+
+		expect(res.cookies).toHaveLength(1);
+		expect(res.cookies[0]?.name).toBe('sid');
+	});
+
+	it('resolves profile by name from default Profiles root', async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-firefox-'));
+		const homeDir = path.join(dir, 'home');
+		const profilesRoot = path.join(
+			homeDir,
+			'Library',
+			'Application Support',
+			'Firefox',
+			'Profiles'
+		);
+		const profileName = 'abc.default-release';
+		const profileDir = path.join(profilesRoot, profileName);
+		const binDir = path.join(dir, 'bin');
+
+		mkdirSync(profileDir, { recursive: true });
+		writeFileSync(path.join(profileDir, 'cookies.sqlite'), '', 'utf8');
+		writeSqlite3Stub(
+			binDir,
+			'sid\u001Fvalue\u001F.chatgpt.com\u001F/\u001F9999999999\u001F1\u001F1\u001F2\n'
+		);
+
+		vi.stubEnv('HOME', homeDir);
+		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+
+		const res = await getCookiesFromFirefox(
+			{ profile: profileName, includeExpired: true },
+			['https://chatgpt.com/'],
+			null
+		);
+
+		expect(res.cookies).toHaveLength(1);
+		expect(res.cookies[0]?.name).toBe('sid');
+	});
+
+	it('auto-picks a default-release profile when no profile is specified', async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-firefox-'));
+		const homeDir = path.join(dir, 'home');
+		const profilesRoot = path.join(
+			homeDir,
+			'Library',
+			'Application Support',
+			'Firefox',
+			'Profiles'
+		);
+		const binDir = path.join(dir, 'bin');
+
+		const defaultRelease = path.join(profilesRoot, 'abc.default-release');
+		const other = path.join(profilesRoot, 'xyz.default');
+		mkdirSync(defaultRelease, { recursive: true });
+		mkdirSync(other, { recursive: true });
+		writeFileSync(path.join(defaultRelease, 'cookies.sqlite'), '', 'utf8');
+		writeFileSync(path.join(other, 'cookies.sqlite'), '', 'utf8');
+
+		writeSqlite3Stub(
+			binDir,
+			'sid\u001Fvalue\u001F.chatgpt.com\u001F/\u001F9999999999\u001F1\u001F1\u001F2\n'
+		);
+
+		vi.stubEnv('HOME', homeDir);
+		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+
+		const res = await getCookiesFromFirefox(
+			{ includeExpired: true },
+			['https://chatgpt.com/'],
+			null
+		);
+
+		expect(res.cookies).toHaveLength(1);
+	});
+
+	it('handles unreadable profile roots gracefully', async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-firefox-'));
+		const homeDir = path.join(dir, 'home');
+		const profilesRoot = path.join(
+			homeDir,
+			'Library',
+			'Application Support',
+			'Firefox',
+			'Profiles'
+		);
+
+		mkdirSync(path.dirname(profilesRoot), { recursive: true });
+		writeFileSync(profilesRoot, 'not a dir', 'utf8');
+
+		vi.stubEnv('HOME', homeDir);
+
+		const res = await getCookiesFromFirefox(
+			{ includeExpired: true },
+			['https://chatgpt.com/'],
+			null
+		);
+
+		expect(res.cookies).toEqual([]);
+		expect(res.warnings.join('\n')).toContain('Firefox cookies database not found');
+	});
+
 	it('filters by allowlist', async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-firefox-'));
 		const dbDir = path.join(dir, 'profile');
