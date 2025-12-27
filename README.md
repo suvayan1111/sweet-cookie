@@ -16,8 +16,8 @@ We keep hitting three realities:
 Sweet Cookie standardizes on one flow:
 1) Inline cookies (exported by the extension) — most reliable.
 2) Best-effort local reads:
-   - Chrome: `chrome-cookies-secure` (if installed) + macOS sqlite/keychain fallback
-   - Firefox: `sqlite3` CLI (Node) or `bun:sqlite` (Bun)
+   - Chrome: `chrome-cookies-secure` (if installed) + macOS `node:sqlite`/`bun:sqlite` + keychain fallback
+   - Firefox: `node:sqlite` (Node) or `bun:sqlite` (Bun)
    - Safari: binarycookies parsing
 
 ## Install
@@ -25,7 +25,7 @@ Sweet Cookie standardizes on one flow:
 Requirements:
 - Node `>=22` (repo default)
 - `pnpm`
-- For Node-based Firefox/Chrome sqlite reads: `sqlite3` in `PATH`
+- No external `sqlite3` CLI needed (uses runtime SQLite: `node:sqlite` / `bun:sqlite`)
 
 ```bash
 pnpm i
@@ -122,7 +122,7 @@ Bun:
 - Chrome via `chrome-cookies-secure` is optional; if native deps hurt, prefer extension exports.
 
 Firefox:
-- needs `sqlite3` CLI (not `node-sqlite3`).
+- uses `node:sqlite` (Node) or `bun:sqlite` (Bun).
 
 ## Related / prior art
 

@@ -1,9 +1,8 @@
-import { existsSync, readdirSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 
 import type { Cookie, CookieSameSite, GetCookiesResult } from '../types.js';
-import { execCapture } from '../util/exec.js';
 import { hostMatchesCookieDomain } from '../util/hostMatch.js';
 import { isBunRuntime } from '../util/runtime.js';
 
@@ -19,6 +18,20 @@ export async function getCookiesFromFirefox(
 		return { cookies: [], warnings };
 	}
 
+	const tempDir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-firefox-'));
+	const tempDbPath = path.join(tempDir, 'cookies.sqlite');
+	try {
+		copyFileSync(dbPath, tempDbPath);
+		copySidecar(dbPath, `${tempDbPath}-wal`, '-wal');
+		copySidecar(dbPath, `${tempDbPath}-shm`, '-shm');
+	} catch (error) {
+		rmSync(tempDir, { recursive: true, force: true });
+		warnings.push(
+			`Failed to copy Firefox cookie DB: ${error instanceof Error ? error.message : String(error)}`
+		);
+		return { cookies: [], warnings };
+	}
+
 	const hosts = origins.map((o) => new URL(o).hostname);
 	const now = Math.floor(Date.now() / 1000);
 	const where = buildHostWhereClause(hosts);
@@ -27,38 +40,27 @@ export async function getCookiesFromFirefox(
 		`SELECT name, value, host, path, expiry, isSecure, isHttpOnly, sameSite ` +
 		`FROM moz_cookies WHERE (${where})${expiryClause} ORDER BY expiry DESC;`;
 
-	if (isBunRuntime()) {
-		const bunResult = await queryFirefoxCookiesWithBunSqlite(dbPath, sql);
-		if (bunResult.ok) {
-			return {
-				cookies: dedupeCookies(
-					collectFirefoxCookiesFromRows(bunResult.rows, options, hosts, allowlistNames)
-				),
-				warnings,
-			};
+	try {
+		if (isBunRuntime()) {
+			const bunResult = await queryFirefoxCookiesWithBunSqlite(tempDbPath, sql);
+			if (!bunResult.ok) {
+				warnings.push(`bun:sqlite failed reading Firefox cookies: ${bunResult.error}`);
+				return { cookies: [], warnings };
+			}
+			const cookies = collectFirefoxCookiesFromRows(bunResult.rows, options, hosts, allowlistNames);
+			return { cookies: dedupeCookies(cookies), warnings };
 		}
-		warnings.push(`bun:sqlite failed reading Firefox cookies: ${bunResult.error}`);
-	}
 
-	const sep = '\u001F';
-	const result = await execCapture('sqlite3', ['-noheader', `-separator`, sep, dbPath, sql], {
-		timeoutMs: 5_000,
-	});
-	if (result.code !== 0) {
-		warnings.push(
-			`sqlite3 failed reading Firefox cookies: ${result.stderr.trim() || `exit ${result.code}`}`
-		);
-		return { cookies: [], warnings };
+		const nodeResult = await queryFirefoxCookiesWithNodeSqlite(tempDbPath, sql);
+		if (!nodeResult.ok) {
+			warnings.push(`node:sqlite failed reading Firefox cookies: ${nodeResult.error}`);
+			return { cookies: [], warnings };
+		}
+		const cookies = collectFirefoxCookiesFromRows(nodeResult.rows, options, hosts, allowlistNames);
+		return { cookies: dedupeCookies(cookies), warnings };
+	} finally {
+		rmSync(tempDir, { recursive: true, force: true });
 	}
-
-	const cookies = collectFirefoxCookiesFromSqlite3Stdout(
-		result.stdout,
-		sep,
-		options,
-		hosts,
-		allowlistNames
-	);
-	return { cookies: dedupeCookies(cookies), warnings };
 }
 
 type FirefoxRow = {
@@ -71,6 +73,24 @@ type FirefoxRow = {
 	isHttpOnly?: unknown;
 	sameSite?: unknown;
 };
+
+async function queryFirefoxCookiesWithNodeSqlite(
+	dbPath: string,
+	sql: string
+): Promise<{ ok: true; rows: FirefoxRow[] } | { ok: false; error: string }> {
+	try {
+		const { DatabaseSync } = await import('node:sqlite');
+		const db = new DatabaseSync(dbPath, { readOnly: true });
+		try {
+			const rows = db.prepare(sql).all() as FirefoxRow[];
+			return { ok: true, rows };
+		} finally {
+			db.close();
+		}
+	} catch (error) {
+		return { ok: false, error: error instanceof Error ? error.message : String(error) };
+	}
+}
 
 async function queryFirefoxCookiesWithBunSqlite(
 	dbPath: string,
@@ -150,50 +170,6 @@ function collectFirefoxCookiesFromRows(
 	return cookies;
 }
 
-function collectFirefoxCookiesFromSqlite3Stdout(
-	stdout: string,
-	sep: string,
-	options: { profile?: string; includeExpired?: boolean },
-	hosts: string[],
-	allowlistNames: Set<string> | null
-): Cookie[] {
-	const now = Math.floor(Date.now() / 1000);
-	const cookies: Cookie[] = [];
-
-	const lines = stdout.split('\n').map((l) => l.trimEnd());
-	for (const line of lines) {
-		if (!line) continue;
-		const parts = line.split(sep);
-		const [name, value, host, cookiePath, expiry, isSecure, isHttpOnly, sameSite] = parts;
-		if (!name || value === undefined || !host) continue;
-		if (allowlistNames && allowlistNames.size > 0 && !allowlistNames.has(name)) continue;
-		if (!hostMatchesAny(hosts, host)) continue;
-		const expires = normalizeFirefoxExpiry(expiry);
-		if (!options.includeExpired && expires && expires < now) continue;
-
-		const cookie: Cookie = {
-			name,
-			value,
-			domain: host.startsWith('.') ? host.slice(1) : host,
-			path: cookiePath || '/',
-			secure: isSecure === '1',
-			httpOnly: isHttpOnly === '1',
-		};
-
-		if (expires !== undefined) cookie.expires = expires;
-		const normalizedSameSite = normalizeFirefoxSameSite(sameSite);
-		if (normalizedSameSite !== undefined) cookie.sameSite = normalizedSameSite;
-
-		const source: NonNullable<Cookie['source']> = { browser: 'firefox' };
-		if (options.profile) source.profile = options.profile;
-		cookie.source = source;
-
-		cookies.push(cookie);
-	}
-
-	return cookies;
-}
-
 function resolveFirefoxCookiesDb(profile?: string): string | null {
 	const home = homedir();
 	// biome-ignore lint/complexity/useLiteralKeys: process.env is an index signature under strict TS.
@@ -248,6 +224,16 @@ function safeReaddir(dir: string): string[] {
 
 function looksLikePath(value: string): boolean {
 	return value.includes('/') || value.includes('\\');
+}
+
+function copySidecar(sourceDbPath: string, target: string, suffix: '-wal' | '-shm'): void {
+	const sidecar = `${sourceDbPath}${suffix}`;
+	if (!existsSync(sidecar)) return;
+	try {
+		copyFileSync(sidecar, target);
+	} catch {
+		// ignore
+	}
 }
 
 function buildHostWhereClause(hosts: string[]): string {

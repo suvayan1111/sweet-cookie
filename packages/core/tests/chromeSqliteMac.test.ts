@@ -3,27 +3,50 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getCookiesFromChromeSqliteMac } from '../src/providers/chromeSqliteMac.js';
 
 // biome-ignore lint/suspicious/noExplicitAny: test-only control surface
-let bunSqliteRows: any[] = [];
-let bunSqliteThrow: boolean = false;
+const nodeSqlite = vi.hoisted(() => ({ rows: [] as any[], shouldThrow: false }));
+// biome-ignore lint/suspicious/noExplicitAny: test-only control surface
+const bunSqlite = vi.hoisted(() => ({ rows: [] as any[], shouldThrow: false }));
+
+vi.mock('node:sqlite', () => {
+	class DatabaseSync {
+		// biome-ignore lint/suspicious/noExplicitAny: test shim
+		constructor(_path: string, _options?: any) {
+			if (nodeSqlite.shouldThrow) {
+				throw new Error('boom');
+			}
+		}
+
+		prepare() {
+			return { all: () => nodeSqlite.rows };
+		}
+
+		close() {}
+	}
+
+	return { DatabaseSync };
+});
 
 vi.mock('bun:sqlite', () => {
 	class Database {
 		// biome-ignore lint/suspicious/noExplicitAny: test shim
 		constructor(_path: string, _options?: any) {
-			if (bunSqliteThrow) {
+			if (bunSqlite.shouldThrow) {
 				throw new Error('boom');
 			}
 		}
+
 		query() {
-			return { all: () => bunSqliteRows };
+			return { all: () => bunSqlite.rows };
 		}
+
 		close() {}
 	}
+
 	return { Database };
 });
 
@@ -46,7 +69,9 @@ function writeShim(
 
 	if (process.platform === 'win32') {
 		const cmd = path.join(binDir, `${name}.cmd`);
-		writeFileSync(cmd, ['@echo off', `node "%~dp0${name}" %*`].join('\r\n'), { encoding: 'utf8' });
+		writeFileSync(cmd, ['@echo off', `node "%~dp0${name}" %*`].join('\r\n'), {
+			encoding: 'utf8',
+		});
 	}
 }
 
@@ -66,7 +91,14 @@ function encryptChromeCookieValueMac(plaintext: string, password: string): Buffe
 }
 
 describe('chrome sqlite (mac) provider', () => {
-	it('reads + decrypts cookies via sqlite3 CLI + macOS keychain stub', async () => {
+	beforeEach(() => {
+		nodeSqlite.rows = [];
+		nodeSqlite.shouldThrow = false;
+		bunSqlite.rows = [];
+		bunSqlite.shouldThrow = false;
+	});
+
+	it('reads + decrypts cookies via node:sqlite + macOS keychain stub', async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-chrome-'));
 		const profileDir = path.join(dir, 'profile');
 		const binDir = path.join(dir, 'bin');
@@ -76,26 +108,22 @@ describe('chrome sqlite (mac) provider', () => {
 
 		const password = 'test-password';
 		writeShim(binDir, 'security', { stdout: `${password}\n`, exitCode: 0 });
+		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
 
 		const encrypted = encryptChromeCookieValueMac('cookie-value', password);
-		const sep = '\u001F';
-		const sqliteOut = [
-			[
-				'sid',
-				'',
-				'.chatgpt.com',
-				'/',
-				'1700000000',
-				'1',
-				'1',
-				'2',
-				encrypted.toString('hex').toUpperCase(),
-			].join(sep),
-			'',
-		].join('\n');
-		writeShim(binDir, 'sqlite3', { stdout: sqliteOut, exitCode: 0 });
-
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+		nodeSqlite.rows = [
+			{
+				name: 'sid',
+				value: '',
+				host_key: '.chatgpt.com',
+				path: '/',
+				expires_utc: 1700000000,
+				is_secure: 1,
+				is_httponly: 1,
+				samesite: 2,
+				encrypted_value: encrypted,
+			},
+		];
 
 		const res = await getCookiesFromChromeSqliteMac(
 			{ profile: profileDir, includeExpired: true },
@@ -121,15 +149,21 @@ describe('chrome sqlite (mac) provider', () => {
 		writeFileSync(path.join(profileDir, 'Cookies'), '', 'utf8');
 
 		writeShim(binDir, 'security', { stdout: 'ignored\n', exitCode: 0 });
-
-		const sep = '\u001F';
-		const sqliteOut = [
-			['sid', 'plain', '.chatgpt.com', '/', '1700000000', '0', '0', '-1', ''].join(sep),
-			'',
-		].join('\n');
-		writeShim(binDir, 'sqlite3', { stdout: sqliteOut, exitCode: 0 });
-
 		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+
+		nodeSqlite.rows = [
+			{
+				name: 'sid',
+				value: 'plain',
+				host_key: '.chatgpt.com',
+				path: '/',
+				expires_utc: 1700000000,
+				is_secure: 0,
+				is_httponly: 0,
+				samesite: -1,
+				encrypted_value: new Uint8Array(),
+			},
+		];
 
 		const res = await getCookiesFromChromeSqliteMac(
 			{ profile: profileDir, includeExpired: true },
@@ -141,7 +175,7 @@ describe('chrome sqlite (mac) provider', () => {
 		expect(res.cookies[0]?.value).toBe('plain');
 	});
 
-	it('normalizes SameSite strings from sqlite output', async () => {
+	it('normalizes SameSite strings from sqlite rows', async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-chrome-'));
 		const profileDir = path.join(dir, 'profile');
 		const binDir = path.join(dir, 'bin');
@@ -150,15 +184,21 @@ describe('chrome sqlite (mac) provider', () => {
 		writeFileSync(path.join(profileDir, 'Cookies'), '', 'utf8');
 
 		writeShim(binDir, 'security', { stdout: 'ignored\n', exitCode: 0 });
-
-		const sep = '\u001F';
-		const sqliteOut = [
-			['sid', 'plain', '.chatgpt.com', '/', '1700000000', '0', '0', 'lax', ''].join(sep),
-			'',
-		].join('\n');
-		writeShim(binDir, 'sqlite3', { stdout: sqliteOut, exitCode: 0 });
-
 		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+
+		nodeSqlite.rows = [
+			{
+				name: 'sid',
+				value: 'plain',
+				host_key: '.chatgpt.com',
+				path: '/',
+				expires_utc: 1700000000,
+				is_secure: 0,
+				is_httponly: 0,
+				samesite: 'lax',
+				encrypted_value: new Uint8Array(),
+			},
+		];
 
 		const res = await getCookiesFromChromeSqliteMac(
 			{ profile: profileDir, includeExpired: true },
@@ -179,7 +219,6 @@ describe('chrome sqlite (mac) provider', () => {
 		writeFileSync(path.join(profileDir, 'Cookies'), '', 'utf8');
 
 		writeShim(binDir, 'security', { stderr: 'nope', exitCode: 1 });
-		writeShim(binDir, 'sqlite3', { stdout: '', exitCode: 0 });
 		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
 
 		const res = await getCookiesFromChromeSqliteMac(
@@ -201,7 +240,6 @@ describe('chrome sqlite (mac) provider', () => {
 		writeFileSync(path.join(profileDir, 'Cookies'), '', 'utf8');
 
 		writeShim(binDir, 'security', { stdout: '\n', exitCode: 0 });
-		writeShim(binDir, 'sqlite3', { stdout: '', exitCode: 0 });
 		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
 
 		const res = await getCookiesFromChromeSqliteMac(
@@ -214,7 +252,7 @@ describe('chrome sqlite (mac) provider', () => {
 		expect(res.warnings.join('\n')).toContain('empty Chrome Safe Storage password');
 	});
 
-	it('returns warnings when sqlite3 fails', async () => {
+	it('returns warnings when node:sqlite fails', async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-chrome-'));
 		const profileDir = path.join(dir, 'profile');
 		const binDir = path.join(dir, 'bin');
@@ -223,9 +261,9 @@ describe('chrome sqlite (mac) provider', () => {
 		writeFileSync(path.join(profileDir, 'Cookies'), '', 'utf8');
 
 		writeShim(binDir, 'security', { stdout: 'pw\n', exitCode: 0 });
-		writeShim(binDir, 'sqlite3', { stderr: 'boom', exitCode: 1 });
 		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
 
+		nodeSqlite.shouldThrow = true;
 		const res = await getCookiesFromChromeSqliteMac(
 			{ profile: profileDir, includeExpired: true },
 			['https://chatgpt.com/'],
@@ -233,10 +271,10 @@ describe('chrome sqlite (mac) provider', () => {
 		);
 
 		expect(res.cookies).toEqual([]);
-		expect(res.warnings.join('\n')).toContain('sqlite3 failed reading Chrome cookies');
+		expect(res.warnings.join('\n')).toContain('node:sqlite failed reading Chrome cookies');
 	});
 
-	it('skips invalid encrypted hex payloads', async () => {
+	it('skips invalid encrypted_value payloads', async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-chrome-'));
 		const profileDir = path.join(dir, 'profile');
 		const binDir = path.join(dir, 'bin');
@@ -245,16 +283,21 @@ describe('chrome sqlite (mac) provider', () => {
 		writeFileSync(path.join(profileDir, 'Cookies'), '', 'utf8');
 
 		writeShim(binDir, 'security', { stdout: 'pw\n', exitCode: 0 });
-
-		const sep = '\u001F';
-		const sqliteOut = [
-			['sid', '', '.chatgpt.com', '/', '1700000000', '1', '1', '2', 'ABC'].join(sep),
-			['sid2', '', '.chatgpt.com', '/', '1700000000', '1', '1', '2', 'GG'].join(sep),
-			'',
-		].join('\n');
-		writeShim(binDir, 'sqlite3', { stdout: sqliteOut, exitCode: 0 });
-
 		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+
+		nodeSqlite.rows = [
+			{
+				name: 'sid',
+				value: '',
+				host_key: '.chatgpt.com',
+				path: '/',
+				expires_utc: 1700000000,
+				is_secure: 1,
+				is_httponly: 1,
+				samesite: 2,
+				encrypted_value: 123,
+			},
+		];
 
 		const res = await getCookiesFromChromeSqliteMac(
 			{ profile: profileDir, includeExpired: true },
@@ -291,26 +334,22 @@ describe('chrome sqlite (mac) provider', () => {
 
 		const password = 'pw';
 		writeShim(binDir, 'security', { stdout: `${password}\n`, exitCode: 0 });
+		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
 
 		const encrypted = encryptChromeCookieValueMac('cookie-value', password);
-		const sep = '\u001F';
-		const sqliteOut = [
-			[
-				'sid',
-				'',
-				'.chatgpt.com',
-				'/',
-				'1',
-				'1',
-				'1',
-				'0',
-				encrypted.toString('hex').toUpperCase(),
-			].join(sep),
-			'',
-		].join('\n');
-		writeShim(binDir, 'sqlite3', { stdout: sqliteOut, exitCode: 0 });
-
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+		nodeSqlite.rows = [
+			{
+				name: 'sid',
+				value: '',
+				host_key: '.chatgpt.com',
+				path: '/',
+				expires_utc: 1,
+				is_secure: 1,
+				is_httponly: 1,
+				samesite: 0,
+				encrypted_value: encrypted,
+			},
+		];
 
 		const res = await getCookiesFromChromeSqliteMac(
 			{ profile: profileDir, includeExpired: false },
@@ -331,26 +370,22 @@ describe('chrome sqlite (mac) provider', () => {
 
 		const password = 'pw';
 		writeShim(binDir, 'security', { stdout: `${password}\n`, exitCode: 0 });
+		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
 
 		const encrypted = encryptChromeCookieValueMac('cookie-value', password);
-		const sep = '\u001F';
-		const sqliteOut = [
-			[
-				'sid',
-				'',
-				'.evil.com',
-				'/',
-				'1700000000',
-				'1',
-				'1',
-				'0',
-				encrypted.toString('hex').toUpperCase(),
-			].join(sep),
-			'',
-		].join('\n');
-		writeShim(binDir, 'sqlite3', { stdout: sqliteOut, exitCode: 0 });
-
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+		nodeSqlite.rows = [
+			{
+				name: 'sid',
+				value: '',
+				host_key: '.evil.com',
+				path: '/',
+				expires_utc: 1700000000,
+				is_secure: 1,
+				is_httponly: 1,
+				samesite: 0,
+				encrypted_value: encrypted,
+			},
+		];
 
 		const res = await getCookiesFromChromeSqliteMac(
 			{ profile: profileDir, includeExpired: true },
@@ -371,26 +406,22 @@ describe('chrome sqlite (mac) provider', () => {
 
 		const password = 'pw';
 		writeShim(binDir, 'security', { stdout: `${password}\n`, exitCode: 0 });
+		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
 
 		const encrypted = encryptChromeCookieValueMac('cookie-value', password);
-		const sep = '\u001F';
-		const sqliteOut = [
-			[
-				'sid',
-				'',
-				'.chatgpt.com',
-				'/',
-				'1700000000',
-				'1',
-				'1',
-				'0',
-				encrypted.toString('hex').toUpperCase(),
-			].join(sep),
-			'',
-		].join('\n');
-		writeShim(binDir, 'sqlite3', { stdout: sqliteOut, exitCode: 0 });
-
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+		nodeSqlite.rows = [
+			{
+				name: 'sid',
+				value: '',
+				host_key: '.chatgpt.com',
+				path: '/',
+				expires_utc: 1700000000,
+				is_secure: 1,
+				is_httponly: 1,
+				samesite: 0,
+				encrypted_value: encrypted,
+			},
+		];
 
 		const res = await getCookiesFromChromeSqliteMac(
 			{ profile: profileDir, includeExpired: true },
@@ -413,7 +444,7 @@ describe('chrome sqlite (mac) provider', () => {
 		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
 
 		const encrypted = encryptChromeCookieValueMac('cookie-value', password);
-		bunSqliteRows = [
+		bunSqlite.rows = [
 			{
 				name: 'sid',
 				value: '',
@@ -438,7 +469,6 @@ describe('chrome sqlite (mac) provider', () => {
 			expect(res.cookies).toHaveLength(1);
 			expect(res.cookies[0]?.value).toBe('cookie-value');
 		} finally {
-			bunSqliteRows = [];
 			(process.versions as unknown as { bun?: string }).bun = prev;
 		}
 	});
@@ -455,7 +485,7 @@ describe('chrome sqlite (mac) provider', () => {
 
 		const prev = (process.versions as unknown as { bun?: string }).bun;
 		(process.versions as unknown as { bun?: string }).bun = '1.0.0';
-		bunSqliteThrow = true;
+		bunSqlite.shouldThrow = true;
 		try {
 			const res = await getCookiesFromChromeSqliteMac(
 				{ profile: profileDir, includeExpired: true },
@@ -465,7 +495,7 @@ describe('chrome sqlite (mac) provider', () => {
 			expect(res.cookies).toEqual([]);
 			expect(res.warnings.join('\n')).toContain('bun:sqlite failed reading Chrome cookies');
 		} finally {
-			bunSqliteThrow = false;
+			bunSqlite.shouldThrow = false;
 			(process.versions as unknown as { bun?: string }).bun = prev;
 		}
 	});

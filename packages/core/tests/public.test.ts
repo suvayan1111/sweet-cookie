@@ -1,8 +1,8 @@
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const itIfDarwin = process.platform === 'darwin' ? it : it.skip;
 
@@ -12,27 +12,34 @@ function buildInlinePayload(): string {
 	});
 }
 
-function writeSqlite3Stub(binDir: string, stdout: string): void {
-	mkdirSync(binDir, { recursive: true });
+// biome-ignore lint/suspicious/noExplicitAny: test-only control surface
+const nodeSqlite = vi.hoisted(() => ({ rows: [] as any[], shouldThrow: false }));
 
-	const shim = path.join(binDir, 'sqlite3');
-	const script = [
-		'#!/usr/bin/env node',
-		`process.stdout.write(${JSON.stringify(stdout)});`,
-		'process.exit(0);',
-	].join('\n');
-	writeFileSync(shim, script, { encoding: 'utf8' });
-	if (process.platform !== 'win32') chmodSync(shim, 0o755);
+vi.mock('node:sqlite', () => {
+	class DatabaseSync {
+		// biome-ignore lint/suspicious/noExplicitAny: test shim
+		constructor(_path: string, _options?: any) {
+			if (nodeSqlite.shouldThrow) {
+				throw new Error('boom');
+			}
+		}
 
-	if (process.platform === 'win32') {
-		const cmd = path.join(binDir, 'sqlite3.cmd');
-		writeFileSync(cmd, ['@echo off', 'node "%~dp0sqlite3" %*'].join('\r\n'), {
-			encoding: 'utf8',
-		});
+		prepare() {
+			return { all: () => nodeSqlite.rows };
+		}
+
+		close() {}
 	}
-}
+
+	return { DatabaseSync };
+});
 
 describe('public API', () => {
+	beforeEach(() => {
+		nodeSqlite.rows = [];
+		nodeSqlite.shouldThrow = false;
+	});
+
 	it('returns inline cookies first (and filters by name)', async () => {
 		const { getCookies } = await import('../src/index.js');
 		const res = await getCookies({
@@ -48,16 +55,22 @@ describe('public API', () => {
 		vi.resetModules();
 
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-public-env-'));
-		const binDir = path.join(dir, 'bin');
 		const firefoxDir = path.join(dir, 'ff');
 		mkdirSync(firefoxDir, { recursive: true });
 		writeFileSync(path.join(firefoxDir, 'cookies.sqlite'), '', 'utf8');
 
-		writeSqlite3Stub(
-			binDir,
-			'firefox\u001Ff\u001F.chatgpt.com\u001F/\u001F9999999999\u001F0\u001F0\u001F0\n'
-		);
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+		nodeSqlite.rows = [
+			{
+				name: 'firefox',
+				value: 'f',
+				host: '.chatgpt.com',
+				path: '/',
+				expiry: 9999999999,
+				isSecure: 0,
+				isHttpOnly: 0,
+				sameSite: 0,
+			},
+		];
 
 		const getCookiesPromised = vi.fn(async () => [
 			{ name: 'chrome', value: 'c', domain: 'chatgpt.com', path: '/', secure: true },
@@ -81,16 +94,22 @@ describe('public API', () => {
 		vi.resetModules();
 
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-public-env-'));
-		const binDir = path.join(dir, 'bin');
 		const firefoxDir = path.join(dir, 'ff');
 		mkdirSync(firefoxDir, { recursive: true });
 		writeFileSync(path.join(firefoxDir, 'cookies.sqlite'), '', 'utf8');
 
-		writeSqlite3Stub(
-			binDir,
-			'firefox\u001Ff\u001F.chatgpt.com\u001F/\u001F9999999999\u001F0\u001F0\u001F0\n'
-		);
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+		nodeSqlite.rows = [
+			{
+				name: 'firefox',
+				value: 'f',
+				host: '.chatgpt.com',
+				path: '/',
+				expiry: 9999999999,
+				isSecure: 0,
+				isHttpOnly: 0,
+				sameSite: 0,
+			},
+		];
 
 		vi.stubEnv('SWEET_COOKIE_BROWSERS', 'firefox, nope');
 		vi.stubEnv('SWEET_COOKIE_MODE', 'nope');
@@ -110,18 +129,32 @@ describe('public API', () => {
 
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-public-'));
 
-		const binDir = path.join(dir, 'bin');
 		const firefoxDir = path.join(dir, 'ff');
 		mkdirSync(firefoxDir, { recursive: true });
 		writeFileSync(path.join(firefoxDir, 'cookies.sqlite'), '', 'utf8');
-		writeSqlite3Stub(
-			binDir,
-			[
-				'dup\u001Fx\u001F.chatgpt.com\u001F/\u001F9999999999\u001F0\u001F0\u001F0\n',
-				'firefox\u001Ff\u001F.chatgpt.com\u001F/\u001F9999999999\u001F0\u001F0\u001F0\n',
-			].join('')
-		);
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+
+		nodeSqlite.rows = [
+			{
+				name: 'dup',
+				value: 'x',
+				host: '.chatgpt.com',
+				path: '/',
+				expiry: 9999999999,
+				isSecure: 0,
+				isHttpOnly: 0,
+				sameSite: 0,
+			},
+			{
+				name: 'firefox',
+				value: 'f',
+				host: '.chatgpt.com',
+				path: '/',
+				expiry: 9999999999,
+				isSecure: 0,
+				isHttpOnly: 0,
+				sameSite: 0,
+			},
+		];
 
 		const getCookiesPromised = vi.fn(async () => [
 			{ name: 'dup', value: 'x', domain: 'chatgpt.com', path: '/', secure: true },
@@ -144,16 +177,22 @@ describe('public API', () => {
 		vi.resetModules();
 
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-public-first-'));
-		const binDir = path.join(dir, 'bin');
 		const firefoxDir = path.join(dir, 'ff');
 		mkdirSync(firefoxDir, { recursive: true });
 		writeFileSync(path.join(firefoxDir, 'cookies.sqlite'), '', 'utf8');
 
-		writeSqlite3Stub(
-			binDir,
-			'only\u001Ff\u001F.chatgpt.com\u001F/\u001F9999999999\u001F0\u001F0\u001F0\n'
-		);
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+		nodeSqlite.rows = [
+			{
+				name: 'only',
+				value: 'f',
+				host: '.chatgpt.com',
+				path: '/',
+				expiry: 9999999999,
+				isSecure: 0,
+				isHttpOnly: 0,
+				sameSite: 0,
+			},
+		];
 
 		const getCookiesPromised = vi.fn(async () => [
 			{ name: 'chrome', value: 'c', domain: 'chatgpt.com', path: '/', secure: true },

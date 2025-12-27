@@ -1,61 +1,57 @@
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getCookiesFromFirefox } from '../src/providers/firefoxSqlite.js';
 
-function writeSqlite3Stub(binDir: string, stdout: string): void {
-	mkdirSync(binDir, { recursive: true });
+// biome-ignore lint/suspicious/noExplicitAny: test-only control surface
+const nodeSqlite = vi.hoisted(() => ({ rows: [] as any[], shouldThrow: false }));
 
-	const shim = path.join(binDir, 'sqlite3');
-	const script = [
-		'#!/usr/bin/env node',
-		`process.stdout.write(${JSON.stringify(stdout)});`,
-		'process.exit(0);',
-	].join('\n');
-	writeFileSync(shim, script, { encoding: 'utf8' });
-	if (process.platform !== 'win32') chmodSync(shim, 0o755);
+vi.mock('node:sqlite', () => {
+	class DatabaseSync {
+		// biome-ignore lint/suspicious/noExplicitAny: test shim
+		constructor(_path: string, _options?: any) {
+			if (nodeSqlite.shouldThrow) {
+				throw new Error('boom');
+			}
+		}
 
-	if (process.platform === 'win32') {
-		const cmd = path.join(binDir, 'sqlite3.cmd');
-		writeFileSync(cmd, ['@echo off', 'node "%~dp0sqlite3" %*'].join('\r\n'), { encoding: 'utf8' });
+		prepare() {
+			return { all: () => nodeSqlite.rows };
+		}
+
+		close() {}
 	}
-}
 
-function writeSqlite3FailingStub(binDir: string, stderr: string): void {
-	mkdirSync(binDir, { recursive: true });
-
-	const shim = path.join(binDir, 'sqlite3');
-	const script = [
-		'#!/usr/bin/env node',
-		`process.stderr.write(${JSON.stringify(stderr)});`,
-		'process.exit(1);',
-	].join('\n');
-	writeFileSync(shim, script, { encoding: 'utf8' });
-	if (process.platform !== 'win32') chmodSync(shim, 0o755);
-
-	if (process.platform === 'win32') {
-		const cmd = path.join(binDir, 'sqlite3.cmd');
-		writeFileSync(cmd, ['@echo off', 'node "%~dp0sqlite3" %*'].join('\r\n'), { encoding: 'utf8' });
-	}
-}
+	return { DatabaseSync };
+});
 
 describe('firefox sqlite provider', () => {
-	it('reads sqlite output via sqlite3 CLI stub', async () => {
+	beforeEach(() => {
+		nodeSqlite.rows = [];
+		nodeSqlite.shouldThrow = false;
+	});
+
+	it('reads cookies via node:sqlite', async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-firefox-'));
 		const dbDir = path.join(dir, 'profile');
-		const binDir = path.join(dir, 'bin');
 
 		mkdirSync(dbDir, { recursive: true });
 		writeFileSync(path.join(dbDir, 'cookies.sqlite'), '', 'utf8');
-		writeSqlite3Stub(
-			binDir,
-			'sid\u001Fvalue\u001F.chatgpt.com\u001F/\u001F9999999999\u001F1\u001F1\u001F2\n'
-		);
-
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+		nodeSqlite.rows = [
+			{
+				name: 'sid',
+				value: 'value',
+				host: '.chatgpt.com',
+				path: '/',
+				expiry: 9999999999,
+				isSecure: 1,
+				isHttpOnly: 1,
+				sameSite: 2,
+			},
+		];
 
 		const res = await getCookiesFromFirefox(
 			{ profile: dbDir, includeExpired: false },
@@ -73,17 +69,22 @@ describe('firefox sqlite provider', () => {
 	it('accepts a direct cookies.sqlite path', async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-firefox-'));
 		const dbDir = path.join(dir, 'profile');
-		const binDir = path.join(dir, 'bin');
 		mkdirSync(dbDir, { recursive: true });
 		const dbPath = path.join(dbDir, 'cookies.sqlite');
 		writeFileSync(dbPath, '', 'utf8');
 
-		writeSqlite3Stub(
-			binDir,
-			'sid\u001Fvalue\u001F.chatgpt.com\u001F/\u001F9999999999\u001F1\u001F1\u001F2\n'
-		);
-
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+		nodeSqlite.rows = [
+			{
+				name: 'sid',
+				value: 'value',
+				host: '.chatgpt.com',
+				path: '/',
+				expiry: 9999999999,
+				isSecure: 1,
+				isHttpOnly: 1,
+				sameSite: 2,
+			},
+		];
 
 		const res = await getCookiesFromFirefox(
 			{ profile: dbPath, includeExpired: true },
@@ -107,17 +108,23 @@ describe('firefox sqlite provider', () => {
 		);
 		const profileName = 'abc.default-release';
 		const profileDir = path.join(profilesRoot, profileName);
-		const binDir = path.join(dir, 'bin');
 
 		mkdirSync(profileDir, { recursive: true });
 		writeFileSync(path.join(profileDir, 'cookies.sqlite'), '', 'utf8');
-		writeSqlite3Stub(
-			binDir,
-			'sid\u001Fvalue\u001F.chatgpt.com\u001F/\u001F9999999999\u001F1\u001F1\u001F2\n'
-		);
+		nodeSqlite.rows = [
+			{
+				name: 'sid',
+				value: 'value',
+				host: '.chatgpt.com',
+				path: '/',
+				expiry: 9999999999,
+				isSecure: 1,
+				isHttpOnly: 1,
+				sameSite: 2,
+			},
+		];
 
 		vi.stubEnv('HOME', homeDir);
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
 
 		const res = await getCookiesFromFirefox(
 			{ profile: profileName, includeExpired: true },
@@ -139,8 +146,6 @@ describe('firefox sqlite provider', () => {
 			'Firefox',
 			'Profiles'
 		);
-		const binDir = path.join(dir, 'bin');
-
 		const defaultRelease = path.join(profilesRoot, 'abc.default-release');
 		const other = path.join(profilesRoot, 'xyz.default');
 		mkdirSync(defaultRelease, { recursive: true });
@@ -148,13 +153,20 @@ describe('firefox sqlite provider', () => {
 		writeFileSync(path.join(defaultRelease, 'cookies.sqlite'), '', 'utf8');
 		writeFileSync(path.join(other, 'cookies.sqlite'), '', 'utf8');
 
-		writeSqlite3Stub(
-			binDir,
-			'sid\u001Fvalue\u001F.chatgpt.com\u001F/\u001F9999999999\u001F1\u001F1\u001F2\n'
-		);
+		nodeSqlite.rows = [
+			{
+				name: 'sid',
+				value: 'value',
+				host: '.chatgpt.com',
+				path: '/',
+				expiry: 9999999999,
+				isSecure: 1,
+				isHttpOnly: 1,
+				sameSite: 2,
+			},
+		];
 
 		vi.stubEnv('HOME', homeDir);
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
 
 		const res = await getCookiesFromFirefox(
 			{ includeExpired: true },
@@ -194,19 +206,31 @@ describe('firefox sqlite provider', () => {
 	it('filters by allowlist', async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-firefox-'));
 		const dbDir = path.join(dir, 'profile');
-		const binDir = path.join(dir, 'bin');
 
 		mkdirSync(dbDir, { recursive: true });
 		writeFileSync(path.join(dbDir, 'cookies.sqlite'), '', 'utf8');
-		writeSqlite3Stub(
-			binDir,
-			[
-				'a\u001F1\u001F.chatgpt.com\u001F/\u001F9999999999\u001F0\u001F0\u001F0\n',
-				'b\u001F2\u001F.chatgpt.com\u001F/\u001F9999999999\u001F0\u001F0\u001F0\n',
-			].join('')
-		);
-
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+		nodeSqlite.rows = [
+			{
+				name: 'a',
+				value: '1',
+				host: '.chatgpt.com',
+				path: '/',
+				expiry: 9999999999,
+				isSecure: 0,
+				isHttpOnly: 0,
+				sameSite: 0,
+			},
+			{
+				name: 'b',
+				value: '2',
+				host: '.chatgpt.com',
+				path: '/',
+				expiry: 9999999999,
+				isSecure: 0,
+				isHttpOnly: 0,
+				sameSite: 0,
+			},
+		];
 
 		const res = await getCookiesFromFirefox(
 			{ profile: dbDir, includeExpired: true },
@@ -230,16 +254,13 @@ describe('firefox sqlite provider', () => {
 		expect(res.warnings.join('\n')).toContain('Firefox cookies database not found');
 	});
 
-	it('returns a warning when sqlite3 fails', async () => {
+	it('returns a warning when node:sqlite fails', async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), 'sweet-cookie-firefox-'));
 		const dbDir = path.join(dir, 'profile');
-		const binDir = path.join(dir, 'bin');
 
 		mkdirSync(dbDir, { recursive: true });
 		writeFileSync(path.join(dbDir, 'cookies.sqlite'), '', 'utf8');
-		writeSqlite3FailingStub(binDir, 'boom');
-
-		vi.stubEnv('PATH', `${binDir}:${process.env.PATH ?? ''}`);
+		nodeSqlite.shouldThrow = true;
 
 		const res = await getCookiesFromFirefox(
 			{ profile: dbDir, includeExpired: true },
@@ -248,6 +269,6 @@ describe('firefox sqlite provider', () => {
 		);
 
 		expect(res.cookies).toHaveLength(0);
-		expect(res.warnings.join('\n')).toContain('sqlite3 failed reading Firefox cookies');
+		expect(res.warnings.join('\n')).toContain('node:sqlite failed reading Firefox cookies');
 	});
 });

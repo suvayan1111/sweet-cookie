@@ -45,11 +45,11 @@ High-signal options:
 2) Local browsers in declared order:
    - **Chrome**
      - `chrome-cookies-secure` if installed + loadable (optional dependency)
-     - macOS fallback: copy DB → query via `sqlite3` CLI (Node) or `bun:sqlite` (Bun) → decrypt via Keychain `security` (Chrome Safe Storage)
+     - macOS fallback: copy DB → query via `node:sqlite` (Node) or `bun:sqlite` (Bun) → decrypt via Keychain `security` (Chrome Safe Storage)
      - Windows: expect failures; prefer inline/export
    - **Firefox**
-     - Bun: `bun:sqlite` (no native Node sqlite bindings)
-     - Node: `sqlite3` CLI (no node-sqlite3 dependency)
+     - Bun: `bun:sqlite`
+     - Node: `node:sqlite`
    - **Safari**
      - parse `Cookies.binarycookies` directly (no WebKit db dependency)
 

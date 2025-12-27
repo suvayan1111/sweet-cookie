@@ -19,7 +19,6 @@ type ChromeRow = {
 	is_httponly?: unknown;
 	samesite?: unknown;
 	encrypted_value?: unknown;
-	encrypted_hex?: unknown;
 };
 
 export async function getCookiesFromChromeSqliteMac(
@@ -89,23 +88,18 @@ export async function getCookiesFromChromeSqliteMac(
 				allowlistNames
 			);
 		} else {
-			const sep = '\u001F';
-			const sqlHex =
-				`SELECT name, value, host_key, path, expires_utc, is_secure, is_httponly, samesite, hex(encrypted_value) as encrypted_hex ` +
-				`FROM cookies WHERE (${where}) ORDER BY expires_utc DESC;`;
-			const result = await execCapture(
-				'sqlite3',
-				['-noheader', '-separator', sep, tempDbPath, sqlHex],
-				{ timeoutMs: 5_000 }
-			);
-			if (result.code !== 0) {
-				warnings.push(
-					`sqlite3 failed reading Chrome cookies: ${result.stderr.trim() || `exit ${result.code}`}`
-				);
+			const nodeResult = await queryChromeCookiesWithNodeSqlite(tempDbPath, sql);
+			if (!nodeResult.ok) {
+				warnings.push(`node:sqlite failed reading Chrome cookies: ${nodeResult.error}`);
 				return { cookies: [], warnings };
 			}
-			const rows = parseSqlite3Rows(result.stdout, sep);
-			cookies = collectChromeCookiesFromRows(rows, chromePassword, options, hosts, allowlistNames);
+			cookies = collectChromeCookiesFromRows(
+				nodeResult.rows,
+				chromePassword,
+				options,
+				hosts,
+				allowlistNames
+			);
 		}
 
 		if (!options.includeExpired) {
@@ -177,6 +171,24 @@ function looksLikePath(value: string): boolean {
 	return value.includes('/') || value.includes('\\');
 }
 
+async function queryChromeCookiesWithNodeSqlite(
+	dbPath: string,
+	sql: string
+): Promise<{ ok: true; rows: ChromeRow[] } | { ok: false; error: string }> {
+	try {
+		const { DatabaseSync } = await import('node:sqlite');
+		const db = new DatabaseSync(dbPath, { readOnly: true });
+		try {
+			const rows = db.prepare(sql).all() as ChromeRow[];
+			return { ok: true, rows };
+		} finally {
+			db.close();
+		}
+	} catch (error) {
+		return { ok: false, error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
 async function queryChromeCookiesWithBunSqlite(
 	dbPath: string,
 	sql: string
@@ -193,38 +205,6 @@ async function queryChromeCookiesWithBunSqlite(
 	} catch (error) {
 		return { ok: false, error: error instanceof Error ? error.message : String(error) };
 	}
-}
-
-function parseSqlite3Rows(stdout: string, sep: string): ChromeRow[] {
-	const rows: ChromeRow[] = [];
-	const lines = stdout.split('\n').map((l) => l.trimEnd());
-	for (const line of lines) {
-		if (!line) continue;
-		const parts = line.split(sep);
-		const [
-			name,
-			value,
-			host_key,
-			rowPath,
-			expires_utc,
-			is_secure,
-			is_httponly,
-			samesite,
-			encrypted_hex,
-		] = parts;
-		rows.push({
-			name,
-			value,
-			host_key,
-			path: rowPath,
-			expires_utc,
-			is_secure,
-			is_httponly,
-			samesite,
-			encrypted_hex,
-		});
-	}
-	return rows;
 }
 
 function collectChromeCookiesFromRows(
@@ -311,27 +291,7 @@ function normalizeChromiumSameSite(value: unknown): CookieSameSite | undefined {
 function getEncryptedBytes(row: ChromeRow): Uint8Array | null {
 	const raw = row.encrypted_value;
 	if (raw instanceof Uint8Array) return raw;
-	if (typeof raw === 'string') {
-		const bytes = hexToBytes(raw);
-		return bytes ? bytes : null;
-	}
-	const hex = typeof row.encrypted_hex === 'string' ? row.encrypted_hex : null;
-	if (!hex) return null;
-	const bytes = hexToBytes(hex);
-	return bytes ? bytes : null;
-}
-
-function hexToBytes(hex: string): Uint8Array | null {
-	const value = hex.trim();
-	if (!value.length) return null;
-	if (value.length % 2 !== 0) return null;
-	const out = new Uint8Array(value.length / 2);
-	for (let i = 0; i < out.length; i += 1) {
-		const byte = Number.parseInt(value.slice(i * 2, i * 2 + 2), 16);
-		if (!Number.isFinite(byte)) return null;
-		out[i] = byte;
-	}
-	return out;
+	return null;
 }
 
 function decryptChromiumCookieValueMac(
