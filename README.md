@@ -27,7 +27,15 @@ Sweet Cookie avoids native Node addons by design:
 - Node `>=22` (for `node:sqlite`) or Bun (for `bun:sqlite`)
 - Local usage only: this reads from your machine’s browser profiles.
 
-## Install (repo)
+## Install
+
+```bash
+npm i @steipete/sweet-cookie
+# or: pnpm add @steipete/sweet-cookie
+# or: bun add @steipete/sweet-cookie
+```
+
+## Install (repo/dev)
 
 ```bash
 pnpm i
