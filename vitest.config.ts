@@ -1,6 +1,14 @@
 import { defineConfig } from 'vitest/config';
 
-const coverageExclude = ['**/*.d.ts', '**/dist/**', '**/node_modules/**', '**/tests/**'];
+const coverageExclude = [
+	'**/*.d.ts',
+	'**/dist/**',
+	'**/node_modules/**',
+	'**/tests/**',
+	// Thin platform dispatch wrappers; covered indirectly in OS-specific provider tests.
+	'packages/core/src/providers/chrome.ts',
+	'packages/core/src/providers/edge.ts',
+];
 
 if (process.platform !== 'darwin') {
 	coverageExclude.push('packages/core/src/providers/safariBinaryCookies.ts');
