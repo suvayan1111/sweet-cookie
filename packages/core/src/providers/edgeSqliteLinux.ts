@@ -12,7 +12,9 @@ export async function getCookiesFromEdgeSqliteLinux(
 	origins: string[],
 	allowlistNames: Set<string> | null
 ): Promise<GetCookiesResult> {
-	const args: Parameters<typeof resolveChromiumCookiesDbLinux>[0] = { configDirName: 'microsoft-edge' };
+	const args: Parameters<typeof resolveChromiumCookiesDbLinux>[0] = {
+		configDirName: 'microsoft-edge',
+	};
 	if (options.profile !== undefined) args.profile = options.profile;
 	const dbPath = resolveChromiumCookiesDbLinux(args);
 	if (!dbPath) {

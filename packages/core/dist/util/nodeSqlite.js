@@ -1,4 +1,16 @@
 let cached = null;
+export function supportsReadBigInts() {
+    const [majorRaw, minorRaw] = process.versions.node.split('.');
+    const major = Number.parseInt(majorRaw ?? '', 10);
+    const minor = Number.parseInt(minorRaw ?? '', 10);
+    if (!Number.isFinite(major) || !Number.isFinite(minor))
+        return false;
+    if (major > 24)
+        return true;
+    if (major < 24)
+        return false;
+    return minor >= 4;
+}
 function shouldSuppressSqliteExperimentalWarning(warning, args) {
     const message = typeof warning === 'string'
         ? warning

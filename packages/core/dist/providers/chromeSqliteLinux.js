@@ -3,7 +3,9 @@ import { getLinuxChromeSafeStoragePassword } from './chromeSqlite/linuxKeyring.j
 import { getCookiesFromChromeSqliteDb } from './chromeSqlite/shared.js';
 import { resolveChromiumCookiesDbLinux } from './chromium/linuxPaths.js';
 export async function getCookiesFromChromeSqliteLinux(options, origins, allowlistNames) {
-    const args = { configDirName: 'google-chrome' };
+    const args = {
+        configDirName: 'google-chrome',
+    };
     if (options.profile !== undefined)
         args.profile = options.profile;
     const dbPath = resolveChromiumCookiesDbLinux(args);

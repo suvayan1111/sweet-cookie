@@ -3,7 +3,9 @@ import { getLinuxChromiumSafeStoragePassword } from './chromeSqlite/linuxKeyring
 import { getCookiesFromChromeSqliteDb } from './chromeSqlite/shared.js';
 import { resolveChromiumCookiesDbLinux } from './chromium/linuxPaths.js';
 export async function getCookiesFromEdgeSqliteLinux(options, origins, allowlistNames) {
-    const args = { configDirName: 'microsoft-edge' };
+    const args = {
+        configDirName: 'microsoft-edge',
+    };
     if (options.profile !== undefined)
         args.profile = options.profile;
     const dbPath = resolveChromiumCookiesDbLinux(args);

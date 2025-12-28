@@ -12,7 +12,9 @@ export async function getCookiesFromChromeSqliteLinux(
 	origins: string[],
 	allowlistNames: Set<string> | null
 ): Promise<GetCookiesResult> {
-	const args: Parameters<typeof resolveChromiumCookiesDbLinux>[0] = { configDirName: 'google-chrome' };
+	const args: Parameters<typeof resolveChromiumCookiesDbLinux>[0] = {
+		configDirName: 'google-chrome',
+	};
 	if (options.profile !== undefined) args.profile = options.profile;
 	const dbPath = resolveChromiumCookiesDbLinux(args);
 	if (!dbPath) {

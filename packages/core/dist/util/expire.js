@@ -1,4 +1,17 @@
 export function normalizeExpiration(expires) {
+    if (expires === undefined || expires === null)
+        return undefined;
+    if (typeof expires === 'bigint') {
+        if (expires <= 0n)
+            return undefined;
+        if (expires > 10000000000000n) {
+            return Number(expires / 1000000n - 11644473600n);
+        }
+        if (expires > 10000000000n) {
+            return Number(expires / 1000n);
+        }
+        return Number(expires);
+    }
     if (!expires || Number.isNaN(expires))
         return undefined;
     const value = Number(expires);
