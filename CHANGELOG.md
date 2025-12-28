@@ -1,9 +1,5 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
-
 ## 0.1.0 - 2025-12-28
 
 Initial release.
@@ -77,4 +73,3 @@ Initial release.
   - Cookie collection:
     - Merges cookies across origins and dedupes by `name|domain|path|storeId`.
     - Maps Chrome cookie fields to Sweet Cookie’s CDP-ish cookie shape and normalizes `sameSite`.
-
