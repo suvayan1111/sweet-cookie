@@ -1,4 +1,4 @@
-# Sweet Cookie 🍪 — Inline-first browser cookie extraction (no native addons)
+# Sweet Cookie 🍪 — Inline-first browser cookie extraction
 
 Small, dependency-light cookie extraction for local tooling.
 
