@@ -8,6 +8,8 @@ const coverageExclude = [
 	// Thin platform dispatch wrappers; covered indirectly in OS-specific provider tests.
 	'packages/core/src/providers/chrome.ts',
 	'packages/core/src/providers/edge.ts',
+	// Depends on external keyring tooling; keep coverage stable across CI environments.
+	'packages/core/src/providers/chromeSqlite/linuxKeyring.ts',
 ];
 
 if (process.platform !== 'darwin') {
